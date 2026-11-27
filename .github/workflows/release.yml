@@ -1,0 +1,83 @@
+# Builds the Windows app and publishes a GitHub Release whenever a version tag is pushed:
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+#
+# Release assets:
+#   * Beez-Video-Studio-Setup-vX.Y.Z.exe — the installer for new users.
+#   * Beez-Video-Studio-vX.Y.Z-x86_64-pc-windows-msvc.zip — the portable app. Its name contains
+#     the target triple and it holds `beez_video_studio.exe`, which is what the in-app updater
+#     (src/updater.rs) downloads. The installer's name must NOT contain the target triple.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check tag matches Cargo.toml version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match Cargo.toml version $version"
+          }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          # The updater picks the zip whose name contains its own target triple.
+          $zip = "Beez-Video-Studio-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip"
+          Compress-Archive -Path target/release/beez_video_studio.exe -DestinationPath $zip
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "Inno Setup compiler not found" }
+          & $iscc "/DAppVersion=$env:VERSION" installer/beezvideo.iss
+          if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
+          "SETUP=dist/Beez-Video-Studio-Setup-v$env:VERSION.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          ## Download
+
+          - **New install:** download ``Beez-Video-Studio-Setup-v$env:VERSION.exe``, run it and follow the steps. No administrator rights are needed.
+          - **Portable:** download the ``.zip``, extract it and run ``beez_video_studio.exe``.
+          - **Already installed?** The app updates itself: open it and click **Update now**.
+          - On first start the app offers to download FFmpeg (the video engine) with one click.
+
+          "@
+          gh release create "${{ github.ref_name }}" "$env:SETUP" "$env:ZIP" `
+            --title "Beez Video Studio ${{ github.ref_name }}" `
+            --notes "$notes" `
+            --generate-notes
