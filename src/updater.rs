@@ -16,7 +16,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use self_update::backends::github::Update;
 
-pub const REPO_OWNER: &str = "smbhathiya";
+pub const REPO_OWNER: &str = "BeezCore2";
 pub const REPO_NAME: &str = "beez_video_studio";
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BIN_NAME: &str = "beez_video_studio";
