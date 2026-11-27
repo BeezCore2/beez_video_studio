@@ -18,7 +18,7 @@
 
 #define AppName "Beez Video Studio"
 #define AppExe "beez_video_studio.exe"
-#define AppUrl "https://github.com/smbhathiya/beez_video_studio"
+#define AppUrl "https://github.com/BeezCore2/beez_video_studio"
 
 #if FileExists(AddBackslash(SourcePath) + "ffmpeg\ffmpeg.exe") && FileExists(AddBackslash(SourcePath) + "ffmpeg\ffprobe.exe")
   #define Bundled
