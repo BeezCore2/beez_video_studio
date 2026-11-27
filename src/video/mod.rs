@@ -2,6 +2,9 @@
 //! process; this module builds its command lines, runs it with progress and cancellation,
 //! and reads media details with ffprobe.
 
+pub mod download;
+pub mod ffmpeg;
+pub mod probe;
 pub mod progress;
 
 /// Human-readable file size, e.g. "12.4 MB".
