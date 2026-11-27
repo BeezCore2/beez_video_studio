@@ -1,7 +1,7 @@
 ; Inno Setup script for Beez Video Studio.
 ;
 ; Build (after `cargo build --release`):
-;   ISCC.exe /DAppVersion=0.1.0 installer\beezvideo.iss
+;   ISCC.exe /DAppVersion=0.2.0 installer\beezvideo.iss
 ; Output: dist\Beez-Video-Studio-Setup-v<version>[-Standalone].exe
 ;
 ; Installs per user into %LOCALAPPDATA%\Programs (no administrator rights needed). This also

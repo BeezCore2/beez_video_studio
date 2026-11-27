@@ -164,14 +164,14 @@ cargo build --release
 $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
 
 # Small installer (no installer\ffmpeg folder):
-& $iscc /DAppVersion=0.1.0 installer\beezvideo.iss
-# → dist\Beez-Video-Studio-Setup-v0.1.0.exe
+& $iscc /DAppVersion=0.2.0 installer\beezvideo.iss
+# → dist\Beez-Video-Studio-Setup-v0.2.0.exe
 
 # Standalone installer: copy FFmpeg in first, for example the copy the app downloaded:
 New-Item -ItemType Directory -Force installer\ffmpeg
 Copy-Item "$env:LOCALAPPDATA\Beez Video Studio\ffmpeg\bin\ff*.exe" installer\ffmpeg\
-& $iscc /DAppVersion=0.1.0 installer\beezvideo.iss
-# → dist\Beez-Video-Studio-Setup-v0.1.0-Standalone.exe
+& $iscc /DAppVersion=0.2.0 installer\beezvideo.iss
+# → dist\Beez-Video-Studio-Setup-v0.2.0-Standalone.exe
 ```
 
 > **FFmpeg licence:** the bundled FFmpeg build is GPL v3. When you distribute the standalone installer, its README.txt points users to the FFmpeg source code, as the GPL requires.
