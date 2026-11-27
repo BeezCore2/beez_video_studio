@@ -62,7 +62,8 @@ pub struct MediaInfo {
     pub format_long: String,
     pub video: Option<VideoStream>,
     pub audio: Vec<AudioStream>,
-    pub subtitles: usize,
+    /// Codec of each subtitle stream (e.g. "subrip", "mov_text", "hdmv_pgs_subtitle").
+    pub subtitles: Vec<String>,
     pub tags: BTreeMap<String, String>,
 }
 
@@ -267,7 +268,7 @@ pub fn parse(json: &str, path: &Path, file_size: u64) -> Result<MediaInfo> {
                 bit_rate: num(&s.bit_rate),
                 language: s.tags.get("language").cloned().unwrap_or_default(),
             }),
-            "subtitle" => info.subtitles += 1,
+            "subtitle" => info.subtitles.push(s.codec_name.clone()),
             _ => {}
         }
     }
@@ -331,7 +332,7 @@ mod tests {
         assert_eq!(i.audio.len(), 1);
         assert_eq!(i.audio[0].sample_rate, 48000);
         assert_eq!(i.audio[0].language, "eng");
-        assert_eq!(i.subtitles, 1);
+        assert_eq!(i.subtitles, ["mov_text"]);
         assert_eq!(i.size, 113_000_000);
         assert!((i.duration - 60.06).abs() < 1e-9);
         assert_eq!(i.tags.get("title").map(String::as_str), Some("Holiday"));

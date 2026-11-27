@@ -2,8 +2,15 @@
 //! process; this module builds its command lines, runs it with progress and cancellation,
 //! and reads media details with ffprobe.
 
+pub mod audio;
+pub mod codec;
+pub mod compress;
+pub mod convert;
 pub mod download;
+pub mod edit;
 pub mod ffmpeg;
+pub mod frames;
+pub mod job;
 pub mod probe;
 pub mod progress;
 

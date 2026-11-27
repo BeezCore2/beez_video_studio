@@ -280,11 +280,17 @@ pub fn format_eta(secs: f64) -> String {
 /// Reports progress into `span`, stops when the user cancels, and turns failures into a
 /// readable error built from FFmpeg's own messages.
 pub fn run(args: &[OsString], span: Span) -> Result<()> {
+    run_capture(args, span, "error").map(|_| ())
+}
+
+/// Like [`run`], but logs at `loglevel` and returns FFmpeg's log (stderr), for analysis
+/// filters that print their results there (e.g. `loudnorm`).
+pub fn run_capture(args: &[OsString], span: Span, loglevel: &str) -> Result<String> {
     let t = require()?;
     span.progress.check()?;
     let mut child = command(&t.ffmpeg)
-        .args(["-hide_banner", "-nostdin", "-y", "-loglevel", "error"])
-        .args(["-progress", "pipe:1", "-stats_period", "0.25"])
+        .args(["-hide_banner", "-nostdin", "-y", "-loglevel", loglevel])
+        .args(["-nostats", "-progress", "pipe:1", "-stats_period", "0.25"])
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -348,7 +354,7 @@ pub fn run(args: &[OsString], span: Span) -> Result<()> {
         bail!("{}", explain(&errors, status.code()));
     }
     span.progress.set(span.to, span.stage);
-    Ok(())
+    Ok(errors)
 }
 
 /// Turn FFmpeg's error output into a short message.
