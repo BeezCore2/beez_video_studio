@@ -111,8 +111,8 @@ impl Canvas {
 fn draw() -> RgbaImage {
     let mut c = Canvas::new();
 
-    // 1. Tile: rounded square with a diagonal Windows-blue gradient.
-    let (top, bottom) = (hex(0x3AA0FF), hex(0x0052CC));
+    // 1. Tile: rounded square with a diagonal green gradient.
+    let (top, bottom) = (hex(0x3DDC84), hex(0x0E8A4B));
     c.paint(|x, y| {
         let d = sd_round_rect(x, y, 512.0, 512.0, 448.0, 448.0, 196.0);
         Some((
@@ -139,7 +139,7 @@ fn draw() -> RgbaImage {
     c.paint(|x, y| {
         let d = screen(x, y - 18.0);
         let a = 0.30 * (1.0 - (d / 40.0).clamp(0.0, 1.0));
-        Some((a, hex(0x002A6B)))
+        Some((a, hex(0x064023)))
     });
 
     // 3. Screen.
@@ -151,7 +151,7 @@ fn draw() -> RgbaImage {
         for cy in [298.0, 682.0] {
             c.paint(move |x, y| {
                 let d = sd_round_rect(x, y, cx, cy, 26.0, 18.0, 8.0);
-                Some((cover(d), hex(0xBBD6F7)))
+                Some((cover(d), hex(0xBDEBD0)))
             });
         }
     }
@@ -168,7 +168,7 @@ fn draw() -> RgbaImage {
         let upper = (x - ax) * nx - (y - ay) * ny;
         let lower = (x - bx) * nx + (y - by) * ny;
         let left = ax - x;
-        Some((cover(left.max(upper).max(lower)), hex(0x0A6CE0)))
+        Some((cover(left.max(upper).max(lower)), hex(0x12A35A)))
     });
 
     // 6. Honeycomb badge: white ring, golden cell, inner cell outline.
