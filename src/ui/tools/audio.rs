@@ -66,6 +66,8 @@ impl AudioState {
     pub fn ui(&mut self, ui: &mut egui::Ui, cx: &Ctx) -> Option<Task> {
         let info = require(ui, cx, false)?.clone();
         self.music.poll();
+        // The chosen track may not exist in a newly selected clip.
+        self.track = self.track.min(info.audio.len().saturating_sub(1));
 
         let mut items = vec![
             (Op::Extract, "Extract audio", "Save the sound as MP3, M4A…"),
