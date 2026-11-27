@@ -8,33 +8,40 @@ GETTING STARTED
 ---------------
 
 1. Open Beez Video Studio from the Start menu.
-2. Drag a video onto the window, or pick a tool on the Home screen.
-3. Choose your settings and press the button at the bottom of the page.
-   Progress, time left and a Cancel button appear at the bottom of the window.
-   When the work is done, click "Open" or "Show in folder".
+2. Click "Import media" (or drag videos onto the window). Your clips appear in
+   the media bin on the left; click one to select it.
+3. Pick a tool from the icons on the right edge, choose its settings, and press
+   its button. Progress, time left and a Cancel button appear in the status bar
+   at the bottom. When the work is done, click "Open" or "Show in folder".
 
-Press Esc to go back to the Home screen.
+The viewer in the middle shows the clip; press Play to preview it (no sound).
+The timeline at the bottom shows the whole clip. Drag on it to move the
+playhead, and mark a range with "Set In" and "Set Out": Trim, GIF and Save
+Frames use that range.
+
+Keyboard: Space play/pause · I / O set In / Out · Left / Right step one frame ·
+Home / End jump to In / Out.
 
 
 TOOLS
 -----
 
-Compress Video    Make videos smaller. Pick a quality level, or an exact size
+Compress          Make videos smaller. Pick a quality level, or an exact size
                   in MB (for example to fit an email or chat limit). The
-                  expected size is shown before you start. Several videos can
-                  be compressed at once.
-Convert Format    MP4, MKV, WebM, MOV, AVI, or audio only (MP3, M4A, Opus,
+                  expected size is shown before you start. Can apply to all
+                  clips in the media bin at once.
+Convert           MP4, MKV, WebM, MOV, AVI, or audio only (MP3, M4A, Opus,
                   FLAC, WAV). When the new format allows it, the video is
                   copied without any quality loss.
-Video to GIF      Turn part of a video into an animated GIF or WebP.
-Trim & Cut        Keep part of a video, or cut a section out of it.
-Join Videos       Put several clips together into one video.
+GIF / WebP        Turn the marked range into an animated GIF or WebP.
+Trim & Cut        Keep the marked range, or cut it out of the video.
+Join Clips        Put all clips of the media bin together, top to bottom.
 Resize & Rotate   Change the resolution, rotate, flip, crop to 9:16 (Shorts,
                   Reels, TikTok), 1:1 or 4:5, or change the frame rate.
-Change Speed      Speed up or slow down, with natural-sounding voices.
-Audio Tools       Extract the sound, remove it, make loudness even, change the
+Speed             Speed up or slow down, with natural-sounding voices.
+Audio             Extract the sound, remove it, make loudness even, change the
                   volume, or add music.
-Save Frames       Save a still image, a series of images or a contact sheet.
+Save Frames       Save the current frame, a series of images or a contact sheet.
 Media Info        See codecs, resolution, frame rate and audio tracks.
 
 
@@ -57,7 +64,7 @@ TROUBLESHOOTING
   %LOCALAPPDATA%\Beez Video Studio\startup.log
   Please include it when you report a problem.
 * Updates: the app checks for new versions when it starts. You can also click
-  "Check for updates" at the bottom of the Home screen.
+  "Check for updates" in the status bar at the bottom of the window.
 
 
 ABOUT FFMPEG

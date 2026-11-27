@@ -1,26 +1,43 @@
-//! Application shell: Home (tool launcher) → full-window tool pages with a back button,
-//! a Windows 11 style InfoBar for results, and background task handling.
+//! The editor workspace, laid out like a video editing studio:
+//!
+//! ```text
+//! ┌ top bar: logo · Import ······························· theme ┐
+//! ├ media bin ┬────────── viewer ──────────┬ inspector ┬ tool rail ┤
+//! │           │  frame / playback          │ settings  │ icons     │
+//! │           │  transport controls        │ + action  │           │
+//! ├───────────┴────────────────────────────┴───────────┴───────────┤
+//! │ timeline: ruler · playhead · V1 filmstrip · A1 waveform · In/Out│
+//! ├ status bar: job progress / result ·········· FFmpeg · updates  ┤
+//! ```
 
+mod bin;
 mod media;
+mod player;
 mod theme;
+mod timeline;
 mod tools;
 mod update;
+mod viewer;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use anyhow::Result;
 use eframe::egui::{
-    self, Align2, Color32, FontId, Margin, RichText, Sense, Stroke, StrokeKind, Vec2,
+    self, Align2, Color32, FontId, Key, Margin, RichText, Sense, Stroke, TextureHandle, Vec2,
 };
 
 use crate::video::download;
 use crate::video::ffmpeg::{self, Caps};
 use crate::video::progress::{Progress, is_cancelled};
-use media::{AUDIO_EXT, Frames, has_ext, media_ext};
+use bin::Bin;
+use media::{Frames, View, Waves, media_ext, pick_files};
+use player::Player;
 use theme::*;
+use timeline::Timeline;
 use tools::*;
 use update::UpdateUi;
+use viewer::{Transport, Viewer};
 
 struct Running {
     label: String,
@@ -46,25 +63,29 @@ enum Engine {
 }
 
 pub struct App {
-    /// `None` = Home screen.
-    tool: Option<Tool>,
+    tool: Tool,
     running: Option<Running>,
     /// Last result: (outcome, message).
     status: Option<(Outcome, String)>,
     engine: Engine,
+    bin: Bin,
+    frames: Frames,
+    waves: Waves,
+    player: Player,
+    viewer: Viewer,
+    timeline: Timeline,
     compress: CompressState,
     convert: ConvertState,
-    gif: GifState,
     trim: TrimState,
-    join: JoinState,
     transform: TransformState,
     speed: SpeedState,
     audio: AudioState,
+    gif: GifState,
     frames_tool: FramesState,
+    join: JoinState,
     info: InfoState,
-    /// Decoded video frames, shared by all tools.
-    frames: Frames,
     update: UpdateUi,
+    logo: Option<TextureHandle>,
 }
 
 fn check_engine(ctx: &egui::Context) -> Engine {
@@ -72,7 +93,9 @@ fn check_engine(ctx: &egui::Context) -> Engine {
     let ctx = ctx.clone();
     std::thread::spawn(move || {
         let result = ffmpeg::refresh().map(|t| {
-            let version = ffmpeg::version(&t).unwrap_or_else(|| "?".into());
+            let version = ffmpeg::version(&t)
+                .map(|v| ffmpeg::friendly_version(&v))
+                .unwrap_or_else(|| "?".into());
             (version, ffmpeg::caps())
         });
         let _ = tx.send(result);
@@ -81,32 +104,56 @@ fn check_engine(ctx: &egui::Context) -> Engine {
     Engine::Checking(rx)
 }
 
+fn load_logo(ctx: &egui::Context) -> Option<TextureHandle> {
+    let img = image::load_from_memory(include_bytes!("../../assets/icon.png")).ok()?;
+    let img = img
+        .resize(64, 64, image::imageops::FilterType::Lanczos3)
+        .to_rgba8();
+    let ci = egui::ColorImage::from_rgba_unmultiplied(
+        [img.width() as usize, img.height() as usize],
+        img.as_raw(),
+    );
+    Some(ctx.load_texture("logo", ci, egui::TextureOptions::LINEAR))
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_fonts(&cc.egui_ctx);
         install_theme(&cc.egui_ctx);
+        // Editors are dark by default; the sun/moon button switches.
+        cc.egui_ctx.set_theme(egui::Theme::Dark);
         let mut app = Self {
-            tool: None,
+            tool: Tool::Compress,
             running: None,
             status: None,
             engine: check_engine(&cc.egui_ctx),
+            bin: Bin::default(),
+            frames: Frames::default(),
+            waves: Waves::default(),
+            player: Player::default(),
+            viewer: Viewer::default(),
+            timeline: Timeline::default(),
             compress: Default::default(),
             convert: Default::default(),
-            gif: Default::default(),
             trim: Default::default(),
-            join: Default::default(),
             transform: Default::default(),
             speed: Default::default(),
             audio: Default::default(),
+            gif: Default::default(),
             frames_tool: Default::default(),
+            join: Default::default(),
             info: Default::default(),
-            frames: Frames::default(),
             update: UpdateUi::new(&cc.egui_ctx),
+            logo: load_logo(&cc.egui_ctx),
         };
         // Files passed on the command line (e.g. "Open with…").
-        let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+        let args: Vec<PathBuf> = std::env::args_os()
+            .skip(1)
+            .map(PathBuf::from)
+            .filter(|p| p.is_file())
+            .collect();
         if !args.is_empty() {
-            app.open_files(&cc.egui_ctx, None, args);
+            app.bin.import(args, &cc.egui_ctx);
         }
         app
     }
@@ -119,6 +166,7 @@ impl App {
     }
 
     fn start(&mut self, ctx: &egui::Context, (label, job): Task) {
+        self.player.stop();
         let (tx, rx) = mpsc::channel();
         let ctx = ctx.clone();
         let progress = Progress::default();
@@ -152,7 +200,7 @@ impl App {
             Ok(Ok(msg)) => (Outcome::Done, msg),
             Ok(Err(e)) if is_cancelled(&e) => (
                 Outcome::Cancelled,
-                "The operation was cancelled. Nothing was saved.".to_string(),
+                "Cancelled. Nothing was saved.".to_string(),
             ),
             Ok(Err(e)) => (Outcome::Failed, format!("{e:#}")),
             Err(mpsc::TryRecvError::Empty) => return,
@@ -168,53 +216,112 @@ impl App {
         }
     }
 
-    /// Route opened/dropped files to a tool. On Home, the file type picks the tool.
-    fn open_files(&mut self, ctx: &egui::Context, tool: Option<Tool>, files: Vec<PathBuf>) {
-        let files: Vec<PathBuf> = files.into_iter().filter(|p| p.is_file()).collect();
-        if files.is_empty() {
+    // ---------------------------------------------------------------------------------
+    // Playback
+    // ---------------------------------------------------------------------------------
+
+    fn toggle_play(&mut self) {
+        if self.player.playing() {
+            self.player.stop();
             return;
         }
-        for f in &files {
-            self.frames.invalidate(f);
-        }
-        let all_audio = files.iter().all(|p| has_ext(p, AUDIO_EXT));
-        let tool = tool.unwrap_or(if all_audio {
-            Tool::Audio
+        let Some(clip) = self.bin.selected() else {
+            return;
+        };
+        let Some(info) = clip.info().cloned() else {
+            return;
+        };
+        // From the start of the range when the playhead is at (or past) its end.
+        let from = if clip.playhead >= clip.range_out - 0.05 {
+            clip.range_in
         } else {
-            Tool::Compress
+            clip.playhead
+        };
+        self.player.play(&info, from);
+    }
+
+    fn seek(&mut self, t: f64) {
+        self.player.stop();
+        self.player.clear();
+        if let Some(c) = self.bin.selected_mut() {
+            c.set_playhead(t);
+        }
+    }
+
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        // Not while typing in a text field.
+        if ctx.egui_wants_keyboard_input() || self.bin.selected().is_none() {
+            return;
+        }
+        // Consume the keys so a focused button doesn't also react to them.
+        let (space, i, o, left, right, home, end) = ctx.input_mut(|inp| {
+            let none = egui::Modifiers::NONE;
+            (
+                inp.consume_key(none, Key::Space),
+                inp.consume_key(none, Key::I),
+                inp.consume_key(none, Key::O),
+                inp.consume_key(none, Key::ArrowLeft),
+                inp.consume_key(none, Key::ArrowRight),
+                inp.consume_key(none, Key::Home),
+                inp.consume_key(none, Key::End),
+            )
         });
-        self.tool = Some(tool);
-        let first = files[0].clone();
-        match tool {
-            Tool::Compress => self.compress.add(files, ctx),
-            Tool::Convert => self.convert.add(files, ctx),
-            Tool::Join => self.join.add(files, ctx),
-            Tool::Gif => self.gif.src.set(first, ctx),
-            Tool::Trim => self.trim.src.set(first, ctx),
-            Tool::Transform => self.transform.src.set(first, ctx),
-            Tool::Speed => self.speed.src.set(first, ctx),
-            Tool::Audio => self.audio.src.set(first, ctx),
-            Tool::Frames => self.frames_tool.src.set(first, ctx),
-            Tool::Info => self.info.src.set(first, ctx),
+        if space {
+            self.toggle_play();
+        }
+        let Some(c) = self.bin.selected_mut() else {
+            return;
+        };
+        let (t, step, rin, rout) = (c.playhead, c.frame_len(), c.range_in, c.range_out);
+        if i {
+            c.set_in(t);
+        }
+        if o {
+            c.set_out(t);
+        }
+        if left {
+            self.seek(t - step);
+        }
+        if right {
+            self.seek(t + step);
+        }
+        if home {
+            self.seek(rin);
+        }
+        if end {
+            self.seek(rout);
         }
     }
 
     // ---------------------------------------------------------------------------------
-    // Home
+    // Panels
     // ---------------------------------------------------------------------------------
+
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_centered(|ui| {
+            if let Some(logo) = &self.logo {
+                ui.add(egui::Image::from_texture((logo.id(), Vec2::splat(26.0))));
+            }
+            ui.label(strong("Beez Video Studio").size(15.0));
+            ui.add_space(18.0);
+            if ui.button(labeled(I_IMPORT, "Import media")).clicked() {
+                let files = pick_files("Videos and audio", &media_ext());
+                self.bin.import(files, ui.ctx());
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                theme_toggle(ui);
+            });
+        });
+    }
 
     fn engine_card(&mut self, ui: &mut egui::Ui) -> Option<Task> {
         let p = Palette::current(ui);
         let mut task_out = None;
         match &self.engine {
             Engine::Checking(_) => {
-                card(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(
-                            "Looking for FFmpeg and testing the graphics card's video encoders…",
-                        );
-                    });
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Looking for FFmpeg and testing the graphics card's video encoders…");
                 });
             }
             Engine::Missing => {
@@ -225,33 +332,25 @@ impl App {
                     .corner_radius(8.0)
                     .inner_margin(Margin::symmetric(20, 16))
                     .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
+                        ui.set_max_width(560.0);
+                        ui.label(RichText::new(I_DOWNLOAD).size(26.0).color(p.accent));
+                        ui.label(strong("One more step: install FFmpeg"));
+                        ui.add(egui::Label::new(secondary(
+                            ui,
+                            "Beez Video Studio uses FFmpeg, the free video engine, to read and encode video. \
+                             It is downloaded once (about 100 MB) into the app's own folder.",
+                        )).wrap());
+                        ui.add_space(8.0);
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(I_DOWNLOAD).size(26.0).color(p.accent));
-                            ui.add_space(8.0);
-                            ui.vertical(|ui| {
-                                ui.spacing_mut().item_spacing.y = 2.0;
-                                ui.label(strong("One more step: install FFmpeg"));
-                                caption(
-                                    ui,
-                                    "Beez Video Studio uses FFmpeg, the free video engine, to read and encode video. \
-                                     It is downloaded once (about 100 MB) into the app's own folder.",
-                                );
-                            });
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let busy = self.running.is_some();
-                                if download::supported()
-                                    && ui.add_enabled_ui(!busy, |ui| accent_button(ui, true, &labeled(I_DOWNLOAD, "Install FFmpeg"))).inner
-                                {
-                                    task_out = task("Installing FFmpeg", download::install);
-                                }
-                                if ui.button("Locate…").on_hover_text("Choose a folder that contains ffmpeg and ffprobe").clicked() {
-                                    locate = true;
-                                }
-                            });
+                            let busy = self.running.is_some();
+                            if download::supported() && ui.add_enabled_ui(!busy, |ui| accent_button(ui, true, &labeled(I_DOWNLOAD, "Install FFmpeg"))).inner {
+                                task_out = task("Installing FFmpeg", download::install);
+                            }
+                            if ui.button("Locate…").on_hover_text("Choose a folder that contains ffmpeg and ffprobe").clicked() {
+                                locate = true;
+                            }
                         });
                     });
-                ui.add_space(4.0);
                 if locate
                     && let Some(dir) = rfd::FileDialog::new()
                         .set_title("Folder with ffmpeg and ffprobe")
@@ -272,256 +371,170 @@ impl App {
         task_out
     }
 
-    fn home(&mut self, ui: &mut egui::Ui) -> Option<Task> {
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(title("Video Studio"));
-                ui.label(secondary(ui, "Choose a tool to get started. Your videos are processed on this PC and never uploaded."));
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                theme_toggle(ui);
-            });
+    /// The viewer area when nothing is imported yet.
+    fn empty_state(&mut self, ui: &mut egui::Ui) -> Option<Task> {
+        let mut t = None;
+        ui.vertical_centered(|ui| {
+            ui.add_space((ui.available_height() * 0.12).max(10.0));
+            t = self.engine_card(ui);
+            ui.add_space(16.0);
+            ui.set_max_width(640.0);
+            if drop_zone(ui, 200.0, "Import media to start", "Click to browse, or drop videos and audio files here") {
+                let files = pick_files("Videos and audio", &media_ext());
+                self.bin.import(files, ui.ctx());
+            }
+            ui.add_space(12.0);
+            caption(ui, "Space to play.   I and O mark In and Out.   ← and → step one frame.   Home and End jump to In and Out.");
         });
-        ui.add_space(16.0);
-        let task_out = self.engine_card(ui);
+        t
+    }
 
-        ui.add_space(4.0);
-        let clicked = drop_zone(
-            ui,
-            150.0,
-            "Drop videos here or click to browse",
-            "Videos open in Compress Video · audio files open in Audio Tools",
-        );
-        if clicked {
-            let files = rfd::FileDialog::new()
-                .add_filter("Videos and audio", &media_ext())
-                .pick_files()
-                .unwrap_or_default();
-            if !files.is_empty() {
-                let ctx = ui.ctx().clone();
-                self.open_files(&ctx, None, files);
+    fn tool_rail(&mut self, ui: &mut egui::Ui) {
+        let p = Palette::current(ui);
+        ui.add_space(6.0);
+        for t in Tool::ALL {
+            let selected = self.tool == t;
+            let (rect, resp) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.0), Sense::click());
+            let painter = ui.painter();
+            if selected {
+                painter.rect_filled(
+                    rect.shrink2(Vec2::new(5.0, 2.0)),
+                    6.0,
+                    p.accent.gamma_multiply(if p.dark { 0.25 } else { 0.18 }),
+                );
+                painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        rect.left_center() - Vec2::new(0.0, 10.0),
+                        Vec2::new(3.0, 20.0),
+                    ),
+                    2.0,
+                    p.accent,
+                );
+            } else if resp.hovered() {
+                painter.rect_filled(rect.shrink2(Vec2::new(5.0, 2.0)), 6.0, p.card_hover);
+            }
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                t.icon(),
+                FontId::proportional(18.0),
+                if selected { p.accent } else { p.text2 },
+            );
+            if resp.on_hover_text(t.name()).clicked() {
+                self.tool = t;
             }
         }
+    }
 
-        let card_w = ((ui.available_width() - 24.0) / 3.0).clamp(240.0, 360.0);
-        for (group, tools) in Tool::GROUPS {
-            ui.add_space(24.0);
-            ui.label(strong(group).size(15.0));
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::splat(12.0);
-                for &t in tools {
-                    if tool_card(ui, t, card_w) {
-                        self.tool = Some(t);
+    /// Status bar: job progress or the last result on the left, engine and version right.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let p = Palette::current(ui);
+        ui.horizontal(|ui| {
+            ui.set_height(30.0);
+            if let Some(r) = &self.running {
+                let pr = r.progress.clone();
+                let cancelling = pr.is_cancelled();
+                let elapsed = r.started.elapsed().as_secs();
+                ui.spinner();
+                ui.label(strong(if cancelling {
+                    "Cancelling…".to_string()
+                } else {
+                    format!("{}…", r.label)
+                }));
+                if let Some(f) = pr.fraction() {
+                    ui.add(
+                        egui::ProgressBar::new(f)
+                            .desired_width(180.0)
+                            .desired_height(6.0)
+                            .fill(p.accent)
+                            .corner_radius(3.0),
+                    );
+                    ui.label(format!("{:.0}%", f * 100.0));
+                }
+                let stage = pr.stage();
+                ui.add(
+                    egui::Label::new(secondary(
+                        ui,
+                        format!("{stage} · {}:{:02}", elapsed / 60, elapsed % 60),
+                    ))
+                    .truncate(),
+                );
+                if ui
+                    .add_enabled(!cancelling, egui::Button::new(labeled(I_CLOSE, "Cancel")))
+                    .clicked()
+                {
+                    pr.cancel();
+                }
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(100));
+                return;
+            }
+            if let Some((outcome, msg)) = self.status.clone() {
+                let (fg, icon) = match outcome {
+                    Outcome::Done => (p.success, I_CHECK),
+                    Outcome::Failed => (p.error, I_ERROR),
+                    Outcome::Cancelled => (p.text2, I_INFO),
+                };
+                ui.label(RichText::new(icon).color(fg));
+                let (text, out) = match msg.rsplit_once(" → ") {
+                    Some((t, path)) => (t.to_string(), Some(PathBuf::from(path.trim()))),
+                    None => (msg.clone(), None),
+                };
+                if let Some(out) = out.filter(|_| outcome == Outcome::Done) {
+                    if out.is_file() && ui.small_button(labeled(I_PLAY, "Open")).clicked() {
+                        let _ = open_path(&out);
+                    }
+                    let dir = if out.is_dir() {
+                        out.clone()
+                    } else {
+                        out.parent().map(Path::to_path_buf).unwrap_or_default()
+                    };
+                    if ui
+                        .small_button(labeled(I_FOLDER, "Show in folder"))
+                        .clicked()
+                    {
+                        let _ = show_in_folder(&out, &dir);
+                    }
+                    if out.is_file()
+                        && ui
+                            .small_button(labeled(I_ADD, "Add to media"))
+                            .on_hover_text("Import the result into the media bin")
+                            .clicked()
+                    {
+                        self.bin.import(vec![out.clone()], ui.ctx());
                     }
                 }
-            });
-        }
-        ui.add_space(16.0);
-        task_out
-    }
-
-    fn footer(&mut self, ui: &mut egui::Ui) {
-        let mut text = String::new();
-        {
-            if let Engine::Ready { version, caps } = &self.engine {
-                text.push_str(&format!(" · FFmpeg {version}"));
-                let gpus: Vec<&str> = [("nvenc", "NVIDIA"), ("qsv", "Intel"), ("amf", "AMD")]
-                    .iter()
-                    .filter(|(k, _)| caps.hardware.iter().any(|h| h.ends_with(k)))
-                    .map(|(_, n)| *n)
-                    .collect();
-                if !gpus.is_empty() {
-                    text.push_str(&format!(" · GPU encoding: {}", gpus.join(", ")));
+                if icon_button(ui, true, I_CLOSE, "Dismiss") {
+                    self.status = None;
                 }
+                ui.add(
+                    egui::Label::new(RichText::new(text).color(if outcome == Outcome::Failed {
+                        p.error
+                    } else {
+                        p.text
+                    }))
+                    .truncate(),
+                )
+                .on_hover_text(&msg);
             }
-        }
-        self.update.footer(ui, &text);
-    }
-
-    // ---------------------------------------------------------------------------------
-    // Tool page
-    // ---------------------------------------------------------------------------------
-
-    fn tool_page(&mut self, ui: &mut egui::Ui, tool: Tool) -> Option<Task> {
-        ui.horizontal(|ui| {
-            let back = egui::Button::new(RichText::new(I_BACK).size(14.0))
-                .frame_when_inactive(false)
-                .min_size(Vec2::splat(36.0));
-            if ui.add(back).on_hover_text("Back to Home (Esc)").clicked() {
-                self.tool = None;
-            }
-            ui.add_space(4.0);
-            let home = ui.add(
-                egui::Label::new(title("Home").color(Palette::current(ui).text2))
-                    .sense(Sense::click()),
-            );
-            if home
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
-                self.tool = None;
-            }
-            ui.label(
-                RichText::new(format!("  {I_RIGHT}  "))
-                    .size(14.0)
-                    .color(Palette::current(ui).text2),
-            );
-            ui.label(title(tool.name()));
         });
-        ui.label(secondary(ui, tool.description()));
-        ui.add_space(8.0);
-
-        if matches!(self.engine, Engine::Missing) {
-            let t = self.engine_card(ui);
-            if t.is_some() {
-                return t;
-            }
-        }
-
-        let caps = self.caps();
-        let body = |app: &mut Self, ui: &mut egui::Ui| {
-            let f = &mut app.frames;
-            match tool {
-                Tool::Compress => app.compress.ui(ui, f, &caps),
-                Tool::Convert => app.convert.ui(ui, f, &caps),
-                Tool::Gif => app.gif.ui(ui, f, &caps),
-                Tool::Trim => app.trim.ui(ui, f, &caps),
-                Tool::Join => app.join.ui(ui, f, &caps),
-                Tool::Transform => app.transform.ui(ui, f, &caps),
-                Tool::Speed => app.speed.ui(ui, f, &caps),
-                Tool::Audio => app.audio.ui(ui, f, &caps),
-                Tool::Frames => app.frames_tool.ui(ui, f, &caps),
-                Tool::Info => app.info.ui(ui, f, &caps),
-            }
-        };
-        let busy = self.running.is_some() || self.update.busy();
-        ui.add_enabled_ui(!busy, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt(tool.name())
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width() - 12.0);
-                    let r = body(self, ui);
-                    ui.add_space(24.0);
-                    r
-                })
-                .inner
-        })
-        .inner
     }
 
-    /// Windows 11 InfoBar with progress / success / error.
-    fn info_bar(&mut self, ui: &mut egui::Ui) {
-        let p = Palette::current(ui);
-        if let Some(r) = &self.running {
-            let pr = r.progress.clone();
-            let cancelling = pr.is_cancelled();
-            let elapsed = r.started.elapsed().as_secs();
-            let fraction = pr.fraction();
-            card(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.add_space(4.0);
-                    ui.vertical(|ui| {
-                        ui.spacing_mut().item_spacing.y = 2.0;
-                        let title = if cancelling {
-                            "Cancelling…".to_string()
-                        } else {
-                            format!("{}…", r.label)
-                        };
-                        ui.label(strong(title));
-                        let stage = pr.stage();
-                        let mut detail = if stage.is_empty() {
-                            "Starting".to_string()
-                        } else {
-                            stage
-                        };
-                        if let Some(f) = fraction {
-                            detail = format!("{:.0}%  ·  {detail}", f * 100.0);
-                        }
-                        detail.push_str(&format!(
-                            "  ·  {}:{:02} elapsed",
-                            elapsed / 60,
-                            elapsed % 60
-                        ));
-                        caption(ui, &detail);
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let btn = egui::Button::new(labeled(I_CLOSE, "Cancel"))
-                            .min_size(Vec2::new(100.0, 32.0));
-                        if ui
-                            .add_enabled(!cancelling, btn)
-                            .on_hover_text("Stop now. Nothing is saved.")
-                            .clicked()
-                        {
-                            pr.cancel();
-                        }
-                    });
-                });
-                ui.add_space(6.0);
-                let bar = match fraction {
-                    Some(f) => egui::ProgressBar::new(f),
-                    None => egui::ProgressBar::new(((ui.input(|i| i.time) * 0.6) % 1.0) as f32),
-                };
-                ui.add(bar.desired_height(6.0).fill(p.accent).corner_radius(3.0));
-            });
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(100));
-            return;
+    fn footer_text(&self) -> String {
+        let mut text = String::new();
+        if let Engine::Ready { version, caps } = &self.engine {
+            text.push_str(&format!("     FFmpeg {version}"));
+            let gpus: Vec<&str> = [("nvenc", "NVIDIA"), ("qsv", "Intel"), ("amf", "AMD")]
+                .iter()
+                .filter(|(k, _)| caps.hardware.iter().any(|h| h.ends_with(k)))
+                .map(|(_, n)| *n)
+                .collect();
+            if !gpus.is_empty() {
+                text.push_str(&format!("     GPU encoding: {}", gpus.join(", ")));
+            }
         }
-        let Some((outcome, msg)) = self.status.clone() else {
-            return;
-        };
-        let ok = outcome == Outcome::Done;
-        let (bg, fg, icon, head) = match outcome {
-            Outcome::Done => (p.success_bg, p.success, I_CHECK, "Done"),
-            Outcome::Failed => (p.error_bg, p.error, I_ERROR, "Something went wrong"),
-            Outcome::Cancelled => (p.card, p.text2, I_INFO, "Cancelled"),
-        };
-        let mut close = false;
-        egui::Frame::new()
-            .fill(bg)
-            .stroke(Stroke::new(1.0, p.border))
-            .corner_radius(8.0)
-            .inner_margin(Margin::symmetric(16, 12))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(icon).color(fg).size(16.0));
-                    ui.add_space(6.0);
-                    ui.label(strong(head));
-                    // Show the produced file name rather than the whole path.
-                    let (text, out) = match msg.rsplit_once(" → ") {
-                        Some((t, path)) => (t.to_string(), Some(PathBuf::from(path.trim()))),
-                        None => (msg.clone(), None),
-                    };
-                    ui.add(egui::Label::new(text).wrap());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icon_button(ui, true, I_CLOSE, "Dismiss") {
-                            close = true;
-                        }
-                        if let Some(out) = out.filter(|_| ok) {
-                            if out.is_file() && ui.button(labeled(I_PLAY, "Open")).clicked() {
-                                let _ = open_path(&out);
-                            }
-                            let dir = if out.is_dir() {
-                                Some(out.clone())
-                            } else {
-                                out.parent().map(Path::to_path_buf)
-                            };
-                            if let Some(dir) = dir
-                                && ui.button(labeled(I_FOLDER, "Show in folder")).clicked()
-                            {
-                                let _ = show_in_folder(&out, &dir);
-                            }
-                        }
-                    });
-                });
-            });
-        if close {
-            self.status = None;
-        }
+        text
     }
 }
 
@@ -539,57 +552,6 @@ fn theme_toggle(ui: &mut egui::Ui) {
             egui::Theme::Dark
         });
     }
-}
-
-/// A launcher card on the Home screen. Returns true when clicked.
-fn tool_card(ui: &mut egui::Ui, tool: Tool, width: f32) -> bool {
-    let p = Palette::current(ui);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 92.0), Sense::click());
-    let painter = ui.painter();
-    let hovered = resp.hovered();
-    painter.rect_filled(rect, 8.0, if hovered { p.card_hover } else { p.card });
-    painter.rect_stroke(rect, 8.0, Stroke::new(1.0, p.border), StrokeKind::Inside);
-
-    let icon_box = egui::Rect::from_min_size(rect.min + Vec2::new(16.0, 16.0), Vec2::splat(40.0));
-    painter.rect_filled(
-        icon_box,
-        6.0,
-        p.accent.gamma_multiply(if p.dark { 0.18 } else { 0.12 }),
-    );
-    painter.text(
-        icon_box.center(),
-        Align2::CENTER_CENTER,
-        tool.icon(),
-        FontId::proportional(20.0),
-        p.accent,
-    );
-
-    let x = icon_box.right() + 14.0;
-    painter.text(
-        egui::pos2(x, rect.top() + 16.0),
-        Align2::LEFT_TOP,
-        tool.name(),
-        FontId::new(15.0, semibold()),
-        p.text,
-    );
-    let desc = painter.layout(
-        tool.description().to_string(),
-        FontId::proportional(12.0),
-        p.text2,
-        rect.right() - x - 16.0,
-    );
-    painter.galley(egui::pos2(x, rect.top() + 40.0), desc, p.text2);
-    if hovered {
-        painter.text(
-            rect.right_top() + Vec2::new(-14.0, 18.0),
-            Align2::RIGHT_TOP,
-            I_RIGHT,
-            FontId::proportional(11.0),
-            p.text2,
-        );
-    }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
 }
 
 fn open_path(p: &Path) -> std::io::Result<()> {
@@ -626,88 +588,232 @@ impl eframe::App for App {
         self.poll(&ctx);
         self.update.poll();
         self.frames.poll(&ctx);
+        self.waves.poll(&ctx);
+        self.bin.poll();
+
+        // Playback moves the playhead; stop at the Out point when a range is set.
+        if let Some(t) = self.player.poll(&ctx)
+            && let Some(c) = self.bin.selected_mut()
+        {
+            c.playhead = t.min(c.duration());
+            if c.has_range() && t >= c.range_out {
+                c.playhead = c.range_out;
+                self.player.stop();
+            }
+        }
 
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
                 .dropped_files
                 .iter()
                 .map(|f| f.path().to_path_buf())
-                .filter(|p| !p.as_os_str().is_empty())
+                .filter(|p| p.is_file())
                 .collect()
         });
-        if !dropped.is_empty() && self.running.is_none() {
-            self.open_files(&ctx, self.tool, dropped);
+        if !dropped.is_empty() {
+            self.player.stop();
+            self.bin.import(dropped, &ctx);
         }
+        self.shortcuts(&ctx);
 
-        let bg = Palette::current(ui).bg;
-        if self.tool.is_none() {
-            egui::Panel::bottom("home_footer")
-                .frame(egui::Frame::new().fill(bg).inner_margin(Margin {
-                    left: 40,
-                    right: 40,
-                    top: 6,
-                    bottom: 10,
-                }))
-                .show(ui, |ui| self.footer(ui));
-        }
-        if self.running.is_some() || self.status.is_some() {
-            egui::Panel::bottom("infobar")
-                .frame(egui::Frame::new().fill(bg).inner_margin(Margin {
-                    left: 40,
-                    right: 40,
-                    top: 8,
-                    bottom: 16,
-                }))
-                .show(ui, |ui| self.info_bar(ui));
-        }
+        let p = Palette::current(ui);
+        let panel = panel_fill(ui);
+        let busy = self.running.is_some() || self.update.busy();
+        let mut action: Option<Task> = None;
 
-        let mut action = None;
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(bg).inner_margin(Margin {
-                left: 40,
-                right: 40,
-                top: 28,
-                bottom: 16,
-            }))
-            .show(ui, |ui| match self.tool {
-                None => {
-                    action = egui::ScrollArea::vertical()
-                        .id_salt("home")
-                        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| self.home(ui))
-                        .inner;
+        egui::Panel::top("top")
+            .frame(
+                egui::Frame::new()
+                    .fill(panel)
+                    .inner_margin(Margin::symmetric(12, 6)),
+            )
+            .show(ui, |ui| self.top_bar(ui));
+
+        let footer = self.footer_text();
+        egui::Panel::bottom("status")
+            .frame(
+                egui::Frame::new()
+                    .fill(panel)
+                    .inner_margin(Margin::symmetric(12, 4)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let w = ui.available_width();
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(w * 0.62, 30.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| self.status_bar(ui),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        self.update.footer(ui, &footer);
+                    });
+                });
+            });
+
+        egui::Panel::bottom("timeline")
+            .frame(
+                egui::Frame::new()
+                    .fill(panel)
+                    .inner_margin(Margin::symmetric(12, 8)),
+            )
+            .show(ui, |ui| match self.bin.selected_mut() {
+                Some(clip) => {
+                    let ev = self
+                        .timeline
+                        .ui(ui, &mut self.frames, &mut self.waves, clip);
+                    if ev.seeked {
+                        self.player.stop();
+                        self.player.clear();
+                    }
                 }
-                Some(tool) => action = self.tool_page(ui, tool),
+                None => {
+                    ui.set_height(60.0);
+                    ui.centered_and_justified(|ui| {
+                        caption(ui, "The timeline shows the selected clip.")
+                    });
+                }
+            });
+
+        egui::Panel::left("bin")
+            .resizable(true)
+            .default_size(250.0)
+            .size_range(190.0..=440.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(panel)
+                    .inner_margin(Margin::same(10)),
+            )
+            .show(ui, |ui| {
+                if self.bin.ui(ui, &mut self.frames) {
+                    self.player.stop();
+                    self.player.clear();
+                }
+            });
+
+        egui::Panel::right("rail")
+            .exact_size(54.0)
+            .resizable(false)
+            .frame(egui::Frame::new().fill(panel))
+            .show(ui, |ui| self.tool_rail(ui));
+
+        egui::Panel::right("inspector")
+            .resizable(true)
+            .default_size(330.0)
+            .size_range(280.0..=520.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(panel)
+                    .inner_margin(Margin::symmetric(14, 12)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.tool.icon()).size(18.0).color(p.accent));
+                    ui.label(strong(self.tool.name()).size(17.0));
+                });
+                ui.add(egui::Label::new(secondary(ui, self.tool.description()).size(12.0)).wrap());
+                ui.separator();
+                let caps = self.caps();
+                let cx = Ctx {
+                    clip: self.bin.selected(),
+                    clips: &self.bin.clips,
+                    caps: &caps,
+                };
+                let tool = self.tool;
+                let (
+                    compress,
+                    convert,
+                    trim,
+                    transform,
+                    speed,
+                    audio,
+                    gif,
+                    frames_tool,
+                    join,
+                    info,
+                ) = (
+                    &mut self.compress,
+                    &mut self.convert,
+                    &mut self.trim,
+                    &mut self.transform,
+                    &mut self.speed,
+                    &mut self.audio,
+                    &mut self.gif,
+                    &mut self.frames_tool,
+                    &mut self.join,
+                    &mut self.info,
+                );
+                action = egui::ScrollArea::vertical()
+                    .id_salt(tool.name())
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width() - 6.0);
+                        ui.add_enabled_ui(!busy, |ui| match tool {
+                            Tool::Compress => compress.ui(ui, &cx),
+                            Tool::Convert => convert.ui(ui, &cx),
+                            Tool::Trim => trim.ui(ui, &cx),
+                            Tool::Transform => transform.ui(ui, &cx),
+                            Tool::Speed => speed.ui(ui, &cx),
+                            Tool::Audio => audio.ui(ui, &cx),
+                            Tool::Gif => gif.ui(ui, &cx),
+                            Tool::Frames => frames_tool.ui(ui, &cx),
+                            Tool::Join => join.ui(ui, &cx),
+                            Tool::Info => info.ui(ui, &cx),
+                        })
+                        .inner
+                    })
+                    .inner;
+            });
+
+        let bg = p.well;
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(bg).inner_margin(Margin::same(10)))
+            .show(ui, |ui| {
+                if self.bin.clips.is_empty() {
+                    if let Some(t) = self.empty_state(ui) {
+                        action = Some(t);
+                    }
+                    return;
+                }
+                if matches!(self.engine, Engine::Missing)
+                    && let Some(t) = self.engine_card(ui)
+                {
+                    action = Some(t);
+                }
+                let view = if self.tool == Tool::Transform {
+                    self.transform.view()
+                } else {
+                    View::default()
+                };
+                let Some(clip) = self.bin.selected() else {
+                    return;
+                };
+                match self
+                    .viewer
+                    .ui(ui, &mut self.frames, &self.player, clip, &view)
+                {
+                    Some(Transport::TogglePlay) => self.toggle_play(),
+                    Some(Transport::Seek(t)) => self.seek(t),
+                    None => {}
+                }
             });
 
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
-            let p = Palette::current(ui);
             let rect = ctx.content_rect();
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Foreground,
                 egui::Id::unique("drop"),
             ));
             painter.rect_filled(rect, 0.0, Color32::from_black_alpha(150));
-            let target = self.tool.map(Tool::name).unwrap_or("Video Studio");
             painter.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
-                format!("{I_OPEN}   Drop to open in {target}"),
+                format!("{I_IMPORT}   Drop to import into the media bin"),
                 FontId::new(26.0, semibold()),
                 p.accent,
             );
         }
 
-        if self.tool.is_some()
-            && self.running.is_none()
-            && !self.update.dialog_open()
-            && ctx.input(|i| i.key_pressed(egui::Key::Escape))
-        {
-            self.tool = None;
-        }
         self.update.dialog(&ctx);
-
         if let Some(t) = action {
             self.start(&ctx, t);
         }

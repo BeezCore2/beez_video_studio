@@ -450,3 +450,24 @@ fn e2e_all_tools() {
 fn out_keep(name: &str) -> PathBuf {
     dir().join(name)
 }
+
+#[test]
+#[ignore]
+fn e2e_preview_stream() {
+    use std::io::Read;
+    let clip = dir().join("src.mp4");
+    let (w, h) = (640u32, 360u32);
+    let started = std::time::Instant::now();
+    let mut child = ffmpeg::spawn_preview(&clip, 2.0, w, h, 30.0).unwrap();
+    let mut out = child.stdout.take().unwrap();
+    let mut buf = vec![0u8; (w * h * 4) as usize];
+    for _ in 0..30 {
+        out.read_exact(&mut buf).unwrap();
+    }
+    let secs = started.elapsed().as_secs_f64();
+    let _ = child.kill();
+    let _ = child.wait();
+    println!("30 frames in {secs:.2} s");
+    // Real-time pacing: 30 frames at 30 fps take about a second.
+    assert!((0.6..2.5).contains(&secs), "{secs}");
+}

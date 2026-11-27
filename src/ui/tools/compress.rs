@@ -1,4 +1,4 @@
-//! Compress Video.
+//! Compress: quality presets or a target size, with a live size estimate.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 
 use super::*;
-use crate::ui::media::{Frames, Source, VIDEO_EXT};
 use crate::video::codec::{HEIGHTS, Speed};
 use crate::video::compress::{self, AudioMode, Mode, Options, PRESETS, Resolution};
 use crate::video::human_size;
@@ -116,122 +115,113 @@ impl Estimator {
         self.running = Some((rx, progress));
     }
 
-    /// The "Estimated result" card.
     fn ui(&self, ui: &mut egui::Ui, infos: &[MediaInfo], target: bool) {
         let p = Palette::current(ui);
-        let mut total_before = 0u64;
-        let mut total_after = 0u64;
-        let mut complete = true;
-        card(ui, |ui| {
-            egui::Grid::new("estimates")
-                .num_columns(2)
-                .spacing([24.0, 6.0])
-                .show(ui, |ui| {
-                    for info in infos {
-                        ui.label(crate::ui::media::file_name(&info.path));
-                        match self.results.get(&info.path) {
-                            Some(Ok(bytes)) => {
-                                total_before += info.size;
-                                total_after += bytes;
-                                let smaller = *bytes < info.size;
-                                let change = if smaller {
-                                    format!(
-                                        "{:.0}% smaller",
-                                        (1.0 - *bytes as f64 / info.size as f64) * 100.0
+        let (mut before, mut after, mut complete) = (0u64, 0u64, true);
+        egui::Frame::new()
+            .fill(p.card)
+            .stroke(egui::Stroke::new(1.0, p.border))
+            .corner_radius(6.0)
+            .inner_margin(10)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                for info in infos {
+                    if infos.len() > 1 {
+                        ui.label(egui::RichText::new(file_name(&info.path)).size(12.0));
+                    }
+                    match self.results.get(&info.path) {
+                        Some(Ok(bytes)) => {
+                            before += info.size;
+                            after += bytes;
+                            let smaller = *bytes < info.size;
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(secondary(
+                                    ui,
+                                    format!("{}  {I_RIGHT}", human_size(info.size)),
+                                ));
+                                ui.label(strong(format!("≈ {}", human_size(*bytes))).size(16.0));
+                                let (text, color) = if smaller {
+                                    (
+                                        format!(
+                                            "{:.0}% smaller",
+                                            (1.0 - *bytes as f64 / info.size as f64) * 100.0
+                                        ),
+                                        p.success,
                                     )
                                 } else {
-                                    "not smaller: try a lower quality or resolution".to_string()
+                                    ("not smaller".to_string(), p.error)
                                 };
-                                let color = if smaller { p.success } else { p.error };
-                                ui.horizontal(|ui| {
-                                    ui.label(format!("{}  {I_RIGHT}  ", human_size(info.size)));
-                                    ui.label(strong(format!("≈ {}", human_size(*bytes))));
-                                    ui.label(
-                                        egui::RichText::new(format!("  {change}")).color(color),
-                                    );
-                                });
-                            }
-                            Some(Err(e)) => {
-                                complete = false;
-                                ui.label(egui::RichText::new(e).color(p.error));
-                            }
-                            None => {
-                                complete = false;
-                                ui.horizontal(|ui| {
-                                    let now = self.current.as_ref() == Some(&info.path);
-                                    let waiting =
-                                        self.changed_at.is_some() || self.running.is_some();
-                                    if waiting {
-                                        ui.spinner();
-                                    }
-                                    let text = match (&self.running, now) {
-                                        (Some((_, pr)), true) => match pr.fraction() {
-                                            Some(f) => format!("Estimating… {:.0}%", f * 100.0),
-                                            None => "Estimating…".into(),
-                                        },
-                                        _ if waiting => "Waiting…".into(),
-                                        _ => "—".into(),
-                                    };
-                                    caption(ui, &text);
-                                });
-                            }
+                                ui.label(egui::RichText::new(text).color(color));
+                            });
                         }
-                        ui.end_row();
+                        Some(Err(e)) => {
+                            complete = false;
+                            ui.add(
+                                egui::Label::new(egui::RichText::new(e).color(p.error).size(12.0))
+                                    .wrap(),
+                            );
+                        }
+                        None => {
+                            complete = false;
+                            ui.horizontal(|ui| {
+                                let now = self.current.as_ref() == Some(&info.path);
+                                let waiting = self.changed_at.is_some() || self.running.is_some();
+                                if waiting {
+                                    ui.spinner();
+                                }
+                                let text = match (&self.running, now) {
+                                    (Some((_, pr)), true) => match pr.fraction() {
+                                        Some(f) => format!("Estimating… {:.0}%", f * 100.0),
+                                        None => "Estimating…".into(),
+                                    },
+                                    _ if waiting => "Waiting…".into(),
+                                    _ => "—".into(),
+                                };
+                                caption(ui, &text);
+                            });
+                        }
                     }
-                    if infos.len() > 1 && complete && total_before > 0 {
-                        ui.label(strong("Total"));
-                        ui.label(strong(format!(
-                            "{}  {I_RIGHT}  ≈ {}",
-                            human_size(total_before),
-                            human_size(total_after)
-                        )));
-                        ui.end_row();
-                    }
-                });
-        });
-        if target {
-            caption(
-                ui,
-                "With a target size, the result lands close to the size you set.",
-            );
+                }
+                if infos.len() > 1 && complete && before > 0 {
+                    ui.separator();
+                    ui.label(strong(format!(
+                        "Total {}  {I_RIGHT}  ≈ {}",
+                        human_size(before),
+                        human_size(after)
+                    )));
+                }
+            });
+        let note = if target {
+            "The result lands close to the size you set."
         } else {
-            caption(
-                ui,
-                "Measured by encoding a few short samples with these settings. Videos whose scenes vary a lot can end up somewhat different.",
-            );
-        }
+            "Measured by encoding short samples with these settings."
+        };
+        ui.add(egui::Label::new(secondary(ui, note).size(11.5)).wrap());
+        ui.add_space(8.0);
     }
 }
 
 pub struct CompressState {
-    pub files: Vec<Source>,
     level: Level,
     target_mb: f64,
     opts: Options,
+    all: bool,
     estimate: Estimator,
 }
 
 impl Default for CompressState {
     fn default() -> Self {
         Self {
-            files: Vec::new(),
             level: Level::Preset(1),
             target_mb: 25.0,
             opts: Options::default(),
+            all: false,
             estimate: Estimator::default(),
         }
     }
 }
 
 impl CompressState {
-    pub fn add(&mut self, paths: Vec<PathBuf>, ctx: &egui::Context) {
-        for p in paths {
-            if !self.files.iter().any(|f| f.path.as_ref() == Some(&p)) {
-                self.files.push(Source::new(p, ctx));
-            }
-        }
-    }
-
     fn options(&self) -> Options {
         let mut o = self.opts.clone();
         o.mode = match self.level {
@@ -244,228 +234,169 @@ impl CompressState {
         o
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, frames: &mut Frames, caps: &Caps) -> Option<Task> {
-        section(ui, "Videos");
-        file_list(
-            ui,
-            frames,
-            &mut self.files,
-            "videos",
-            VIDEO_EXT,
-            "Add one video, or several to compress them all with the same settings",
-            false,
-        );
+    pub fn ui(&mut self, ui: &mut egui::Ui, cx: &Ctx) -> Option<Task> {
+        let info = require(ui, cx, true)?.clone();
+        let videos = cx.videos();
+        let all = apply_to(ui, &mut self.all, videos.len());
+        let targets: Vec<MediaInfo> = if all { videos } else { vec![info.clone()] };
 
-        section(ui, "Size");
-        card(ui, |ui| {
-            let mut items: Vec<(Level, &str, &str)> = PRESETS
-                .iter()
-                .enumerate()
-                .map(|(i, (n, d, _))| (Level::Preset(i), *n, *d))
-                .collect();
-            items.push((Level::Target, "Target size", "An exact file size in MB"));
-            if big_choices(ui, &mut self.level, &items) {
-                self.opts.resolution = if self.level == Level::Target {
-                    Resolution::Auto
-                } else {
-                    Resolution::Original
-                };
-            }
-        });
-        let first = self.files.iter().find_map(|f| f.video()).cloned();
+        group(ui, "Size");
+        let mut items: Vec<(Level, &str, &str)> = PRESETS
+            .iter()
+            .enumerate()
+            .map(|(i, (n, d, _))| (Level::Preset(i), *n, *d))
+            .collect();
+        items.push((Level::Target, "Target size", "An exact file size in MB"));
+        if choice_list(ui, &mut self.level, &items) {
+            self.opts.resolution = if self.level == Level::Target {
+                Resolution::Auto
+            } else {
+                Resolution::Original
+            };
+        }
         if self.level == Level::Target {
-            setting(
+            field(
                 ui,
-                I_PACKAGE,
-                "Target size",
-                "For each video. Encoded in two passes to land close to it.",
+                "Target size (each video)",
+                "Encoded in two passes to land close to it.",
                 |ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut self.target_mb)
-                            .range(0.5..=100_000.0)
-                            .speed(0.5)
-                            .suffix(" MB")
-                            .max_decimals(1),
-                    );
-                    for mb in [50.0, 25.0, 10.0, 8.0] {
-                        if ui.small_button(format!("{mb} MB")).clicked() {
-                            self.target_mb = mb;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut self.target_mb)
+                                .range(0.5..=100_000.0)
+                                .speed(0.5)
+                                .suffix(" MB")
+                                .max_decimals(1),
+                        );
+                        for mb in [8.0, 10.0, 25.0, 50.0] {
+                            if ui.small_button(format!("{mb}")).clicked() {
+                                self.target_mb = mb;
+                            }
                         }
-                    }
-                    if let Some(i) = &first
-                        && ui
-                            .small_button("Half")
-                            .on_hover_text("Half of the first video's size")
+                        if ui
+                            .small_button("½")
+                            .on_hover_text("Half of this clip's size")
                             .clicked()
-                    {
-                        self.target_mb =
-                            (i.size as f64 / 1024.0 / 1024.0 / 2.0 * 10.0).round() / 10.0;
-                    }
+                        {
+                            self.target_mb =
+                                (info.size as f64 / 1024.0 / 1024.0 / 2.0 * 10.0).round() / 10.0;
+                        }
+                    });
                 },
             );
         }
 
-        // What the settings mean for the first video.
-        if let Some(info) = &first {
-            let opts = self.options();
-            let (_, audio_bps) =
-                compress::audio_args(info, opts.audio, compress::container(opts.codec));
-            match compress::plan(info, &opts, audio_bps) {
-                Ok(plan) => {
-                    let mut parts = vec![format!("Original: {}", human_size(info.size))];
-                    if let Some(bps) = plan.video_bps {
-                        parts.push(format!("video bitrate ≈ {}", fmt_bitrate(bps)));
-                    }
-                    if let Some((w, h)) = plan.size {
-                        parts.push(format!("resized to {w}×{h}"));
-                    }
-                    hint(ui, I_INFO, &parts.join(" · "));
+        // What the settings mean, and the expected size.
+        let opts = self.options();
+        let (_, audio_bps) =
+            compress::audio_args(&info, opts.audio, compress::container(opts.codec));
+        match compress::plan(&info, &opts, audio_bps) {
+            Ok(plan) => {
+                let mut parts = Vec::new();
+                if let Some(bps) = plan.video_bps {
+                    parts.push(format!("Video ≈ {}", fmt_bitrate(bps)));
                 }
-                Err(e) => {
-                    let p = Palette::current(ui);
-                    ui.label(egui::RichText::new(format!("{I_ERROR}  {e}")).color(p.error));
+                if let Some((w, h)) = plan.size {
+                    parts.push(format!("resized to {w}×{h}"));
+                }
+                if !parts.is_empty() {
+                    hint(ui, I_INFO, &parts.join(", "));
                 }
             }
+            Err(e) => error_note(ui, &e.to_string()),
         }
+        group(ui, "Estimated result");
+        let key = (
+            opts.clone(),
+            targets.iter().map(|i| i.path.clone()).collect(),
+        );
+        let can_start = ui.is_enabled() && !cx.caps.encoders.is_empty();
+        let ctx = ui.ctx().clone();
+        self.estimate
+            .update(&ctx, key, targets.clone(), cx.caps, can_start);
+        self.estimate.ui(ui, &targets, self.level == Level::Target);
 
-        section(ui, "Video");
+        group(ui, "Video");
         let o = &mut self.opts;
-        setting(
+        field(
             ui,
-            I_VIDEO,
-            "Video codec",
-            "H.265 and AV1 give smaller files at the same quality, but encode slower",
+            "Codec",
+            "H.265 and AV1 are smaller at the same quality, but slower.",
             |ui| {
-                codec_combo(ui, "c_codec", &mut o.codec, &VideoCodec::ALL, caps);
+                codec_combo(ui, "c_codec", &mut o.codec, &VideoCodec::ALL, cx.caps);
             },
         );
-        setting(
-            ui,
-            I_FLASH,
-            "Encoder",
-            "GPU encoding is much faster; the CPU makes smaller files",
-            |ui| {
-                backend_combo(ui, "c_backend", &mut o.backend, o.codec, caps);
-            },
-        );
-        setting(
-            ui,
-            I_SPEED,
-            "Encoding speed",
-            "Slower settings squeeze out a smaller file",
-            |ui| {
-                let items: Vec<(Speed, &str)> =
-                    Speed::ALL.iter().rev().map(|s| (*s, s.name())).collect();
-                combo(ui, "c_speed", &mut o.speed, &items);
-            },
-        );
-        setting(
-            ui,
-            I_RESIZE,
-            "Resolution",
-            "Lower resolutions make much smaller files. Never upscales.",
-            |ui| {
-                let mut items: Vec<(Resolution, String)> =
-                    vec![(Resolution::Original, "Keep original".into())];
-                if self.level == Level::Target {
-                    items.push((Resolution::Auto, "Automatic (best for the size)".into()));
-                }
-                items.extend(
-                    HEIGHTS
-                        .iter()
-                        .map(|&h| (Resolution::Limit(h), format!("{}p", h))),
-                );
-                let refs: Vec<(Resolution, &str)> =
-                    items.iter().map(|(r, s)| (*r, s.as_str())).collect();
-                combo(ui, "c_res", &mut o.resolution, &refs);
-            },
-        );
-        setting(
-            ui,
-            I_CLOCK,
-            "Frame rate",
-            "30 fps is plenty for most videos",
-            |ui| {
-                combo(
-                    ui,
-                    "c_fps",
-                    &mut o.max_fps,
-                    &[
-                        (None, "Keep original"),
-                        (Some(60), "60 fps at most"),
-                        (Some(30), "30 fps at most"),
-                        (Some(24), "24 fps at most"),
-                    ],
-                );
-            },
-        );
-
-        section(ui, "Audio");
-        setting(
-            ui,
-            I_AUDIO,
-            "Audio",
-            "Copying keeps the sound untouched when possible",
-            |ui| {
-                combo(
-                    ui,
-                    "c_audio",
-                    &mut o.audio,
-                    &[
-                        (AudioMode::Keep, "Keep original"),
-                        (AudioMode::Encode(192), "192 kbps (high)"),
-                        (AudioMode::Encode(128), "128 kbps (good)"),
-                        (AudioMode::Encode(96), "96 kbps"),
-                        (AudioMode::Encode(64), "64 kbps (voice)"),
-                        (AudioMode::Remove, "Remove audio"),
-                    ],
-                );
-            },
-        );
-
-        let ready: Vec<_> = self
-            .files
-            .iter()
-            .filter_map(|f| f.video().cloned())
-            .collect();
-        let loading = self.files.iter().any(|f| f.loading());
-
-        // Expected size, shown before starting.
-        if !ready.is_empty() {
-            section(ui, "Estimated result");
-            let key = (
-                self.options(),
-                ready.iter().map(|i| i.path.clone()).collect(),
+        field(ui, "Encoder", "", |ui| {
+            backend_combo(ui, "c_backend", &mut o.backend, o.codec, cx.caps)
+        });
+        field(ui, "Encoding speed", "", |ui| {
+            let items: Vec<(Speed, &str)> =
+                Speed::ALL.iter().rev().map(|s| (*s, s.name())).collect();
+            combo(ui, "c_speed", &mut o.speed, &items);
+        });
+        field(ui, "Resolution", "Never upscales.", |ui| {
+            let mut items: Vec<(Resolution, String)> =
+                vec![(Resolution::Original, "Keep original".into())];
+            if self.level == Level::Target {
+                items.push((Resolution::Auto, "Automatic (best for the size)".into()));
+            }
+            items.extend(
+                HEIGHTS
+                    .iter()
+                    .map(|&h| (Resolution::Limit(h), format!("{h}p"))),
             );
-            // Don't sample while a real job runs (the page is disabled then) or before
-            // the encoders are known.
-            let can_start = ui.is_enabled() && !caps.encoders.is_empty() && !loading;
-            let ctx = ui.ctx().clone();
-            self.estimate
-                .update(&ctx, key, ready.clone(), caps, can_start);
-            self.estimate.ui(ui, &ready, self.level == Level::Target);
-        }
+            let refs: Vec<(Resolution, &str)> =
+                items.iter().map(|(r, s)| (*r, s.as_str())).collect();
+            combo(ui, "c_res", &mut o.resolution, &refs);
+        });
+        field(ui, "Frame rate", "", |ui| {
+            combo(
+                ui,
+                "c_fps",
+                &mut o.max_fps,
+                &[
+                    (None, "Keep original"),
+                    (Some(60), "60 fps at most"),
+                    (Some(30), "30 fps at most"),
+                    (Some(24), "24 fps at most"),
+                ],
+            );
+        });
+        group(ui, "Audio");
+        field(ui, "Audio", "", |ui| {
+            combo(
+                ui,
+                "c_audio",
+                &mut o.audio,
+                &[
+                    (AudioMode::Keep, "Keep original"),
+                    (AudioMode::Encode(192), "192 kbps (high)"),
+                    (AudioMode::Encode(128), "128 kbps (good)"),
+                    (AudioMode::Encode(96), "96 kbps"),
+                    (AudioMode::Encode(64), "64 kbps (voice)"),
+                    (AudioMode::Remove, "Remove audio"),
+                ],
+            );
+        });
 
-        let n = ready.len();
+        ui.add_space(8.0);
+        let n = targets.len();
         let label = if n > 1 {
-            format!("Compress {n} videos")
+            format!("Compress {n} videos…")
         } else {
-            "Compress & save".into()
+            "Compress & save…".into()
         };
-        if footer(ui, n > 0 && !loading, &labeled(I_SAVE, &label)) {
-            let opts = self.options();
+        if action_button(ui, n > 0, &labeled(I_SAVE, &label)) {
             let ext = compress::container(opts.codec).ext();
-            let caps = caps.clone();
+            let caps = cx.caps.clone();
             if n == 1 {
-                let info = ready.into_iter().next()?;
                 let out = save_as(Some(&info.path), "compressed", ext)?;
-                // Free the CPU for the real encode.
                 self.estimate.cancel();
                 return job_task("Compressing", compress::build(&info, &out, &opts, &caps));
             }
-            let dir = pick_folder(Some(&ready[0].path))?;
+            let dir = pick_folder(Some(&info.path))?;
             self.estimate.cancel();
-            let items = batch_outputs(ready, &dir, "compressed", |_| ext.to_string());
+            let items = batch_outputs(targets, &dir, "compressed", |_| ext.to_string());
             return batch_task("Compressing", "Compressed", items, move |i, out| {
                 compress::build(i, out, &opts, &caps)
             });

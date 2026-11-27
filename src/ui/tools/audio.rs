@@ -1,23 +1,22 @@
-//! Audio Tools: extract, remove, normalize, volume, music.
+//! Audio: extract, remove, normalize, volume, music.
 
 use eframe::egui;
 
 use super::*;
-use crate::ui::media::{AUDIO_EXT, Frames, Source, media_ext};
+use crate::ui::media::{AUDIO_EXT, Source, VIDEO_EXT, pick_file};
 use crate::video::audio::{self, Format, LOUDNESS, MusicMode};
 use crate::video::codec::Container;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Op {
     Extract,
-    Remove,
     Normalize,
     Volume,
+    Remove,
     Music,
 }
 
 pub struct AudioState {
-    pub src: Source,
     op: Op,
     format: Format,
     kbps: u32,
@@ -32,7 +31,6 @@ pub struct AudioState {
 impl Default for AudioState {
     fn default() -> Self {
         Self {
-            src: Source::default(),
             op: Op::Extract,
             format: Format::Mp3,
             kbps: 0,
@@ -65,47 +63,46 @@ fn same_kind_ext(info: &MediaInfo) -> String {
 }
 
 impl AudioState {
-    pub fn ui(&mut self, ui: &mut egui::Ui, frames: &mut Frames, _caps: &Caps) -> Option<Task> {
-        section(ui, "File");
-        self.src.ui(ui, frames, "video or audio file", &media_ext());
-        let info = self.src.info.clone()?;
+    pub fn ui(&mut self, ui: &mut egui::Ui, cx: &Ctx) -> Option<Task> {
+        let info = require(ui, cx, false)?.clone();
+        self.music.poll();
+        // The chosen track may not exist in a newly selected clip.
+        self.track = self.track.min(info.audio.len().saturating_sub(1));
+
+        let mut items = vec![
+            (Op::Extract, "Extract audio", "Save the sound as MP3, M4A…"),
+            (
+                Op::Normalize,
+                "Normalize loudness",
+                "Even, standard loudness",
+            ),
+            (Op::Volume, "Volume", "Louder or quieter"),
+        ];
+        if info.has_video() {
+            items.push((Op::Remove, "Remove audio", "Silent video, no quality loss"));
+            items.push((Op::Music, "Add music", "Replace or mix in a track"));
+        }
         if !info.has_audio() {
-            let p = Palette::current(ui);
-            ui.label(
-                egui::RichText::new(format!("{I_INFO}  This file has no audio.")).color(p.error),
-            );
+            error_note(ui, "This clip has no audio.");
             if info.has_video() {
-                self.op = Op::Music;
+                items.retain(|(o, _, _)| *o == Op::Music);
             } else {
                 return None;
             }
         }
+        if !items.iter().any(|(o, _, _)| *o == self.op) {
+            self.op = items[0].0;
+        }
+        group(ui, "Action");
+        choice_list(ui, &mut self.op, &items);
 
-        section(ui, "What to do");
-        card(ui, |ui| {
-            let mut items = vec![
-                (Op::Extract, "Extract audio", "Save the sound as MP3, M4A…"),
-                (Op::Normalize, "Normalize", "Even, standard loudness"),
-                (Op::Volume, "Volume", "Make it louder or quieter"),
-            ];
-            if info.has_video() {
-                items.push((Op::Remove, "Remove audio", "Silent video, no quality loss"));
-                items.push((Op::Music, "Add music", "Replace or mix in a track"));
-            }
-            if !items.iter().any(|(o, _, _)| *o == self.op) {
-                self.op = Op::Extract;
-            }
-            big_choices(ui, &mut self.op, &items);
-        });
-
-        section(ui, "Options");
+        group(ui, "Options");
         match self.op {
             Op::Extract => {
-                setting(
+                field(
                     ui,
-                    I_AUDIO,
                     "Format",
-                    "Original copies the sound exactly as it is stored",
+                    "Original copies the sound exactly as it is.",
                     |ui| {
                         let items: Vec<(Format, &str)> =
                             Format::ALL.iter().map(|f| (*f, f.name())).collect();
@@ -113,7 +110,7 @@ impl AudioState {
                     },
                 );
                 if self.format.lossy() {
-                    setting(ui, "", "Bitrate", "", |ui| {
+                    field(ui, "Bitrate", "", |ui| {
                         let mut items = vec![
                             (320, "320 kbps"),
                             (256, "256 kbps"),
@@ -131,7 +128,7 @@ impl AudioState {
                     });
                 }
                 if info.audio.len() > 1 {
-                    setting(ui, "", "Audio track", "", |ui| {
+                    field(ui, "Track", "", |ui| {
                         let labels: Vec<String> = info
                             .audio
                             .iter()
@@ -159,17 +156,12 @@ impl AudioState {
                     });
                 }
             }
-            Op::Remove => hint(
-                ui,
-                I_FLASH,
-                "The video is copied without re-encoding, so nothing else changes.",
-            ),
+            Op::Remove => hint(ui, I_FLASH, "The video is copied without re-encoding."),
             Op::Normalize => {
-                setting(
+                field(
                     ui,
-                    I_VOLUME,
                     "Target loudness",
-                    "Measured over the whole file (EBU R128), then adjusted in one even step",
+                    "Measured over the whole file (EBU R128), then adjusted in one even step.",
                     |ui| {
                         let items: Vec<(usize, &str)> =
                             LOUDNESS.iter().enumerate().map(|(i, l)| (i, l.0)).collect();
@@ -178,12 +170,12 @@ impl AudioState {
                 );
             }
             Op::Volume => {
-                setting(
+                field(
                     ui,
-                    I_VOLUME,
                     "Change",
-                    "+6 dB is about twice as loud. Loud boosts are limited so they don't distort.",
+                    "+6 dB ≈ twice as loud. Boosts are limited so they don't distort.",
                     |ui| {
+                        ui.spacing_mut().slider_width = ui.available_width() - 80.0;
                         ui.add(
                             egui::Slider::new(&mut self.db, -20.0..=20.0)
                                 .suffix(" dB")
@@ -193,30 +185,49 @@ impl AudioState {
                 );
             }
             Op::Music => {
-                ui.label(strong("Music or audio track"));
-                self.music.ui(
-                    ui,
-                    frames,
-                    "audio file",
-                    &[AUDIO_EXT, crate::ui::media::VIDEO_EXT].concat(),
-                );
+                field(ui, "Music file", "", |ui| {
+                    match (&self.music.path, &self.music.info) {
+                        (Some(p), Some(i)) => {
+                            ui.label(strong(file_name(p)));
+                            caption(ui, &i.summary());
+                        }
+                        (Some(p), None) => {
+                            ui.label(file_name(p));
+                            match &self.music.error {
+                                Some(e) => error_note(ui, e),
+                                None => caption(ui, "Reading…"),
+                            }
+                        }
+                        _ => {}
+                    }
+                    let label = if self.music.path.is_some() {
+                        "Change…"
+                    } else {
+                        "Choose audio file…"
+                    };
+                    if ui
+                        .add(
+                            egui::Button::new(labeled(I_OPEN, label))
+                                .min_size(egui::Vec2::new(ui.available_width(), 30.0)),
+                        )
+                        .clicked()
+                        && let Some(p) = pick_file("Audio", &[AUDIO_EXT, VIDEO_EXT].concat())
+                    {
+                        self.music.set(p, ui.ctx());
+                    }
+                });
                 if info.has_audio() {
-                    setting(ui, I_AUDIO, "Mode", "", |ui| {
-                        segmented(
-                            ui,
-                            &mut self.mix,
-                            &[(true, "Mix with original"), (false, "Replace original")],
-                            140.0,
-                        );
+                    field(ui, "Mode", "", |ui| {
+                        segmented(ui, &mut self.mix, &[(true, "Mix in"), (false, "Replace")]);
                     });
                 }
                 if self.mix && info.has_audio() {
-                    setting(
+                    field(
                         ui,
-                        I_VOLUME,
                         "Music volume",
-                        "Background level under the original sound. The music repeats if it is shorter.",
+                        "The music repeats if it is shorter than the video.",
                         |ui| {
+                            ui.spacing_mut().slider_width = ui.available_width() - 70.0;
                             ui.add(
                                 egui::Slider::new(&mut self.music_volume, 0.05..=1.5)
                                     .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
@@ -227,18 +238,19 @@ impl AudioState {
                     hint(
                         ui,
                         I_INFO,
-                        "The video keeps playing until the shorter of video and music ends.",
+                        "Plays until the shorter of video and music ends.",
                     );
                 }
             }
         }
 
+        ui.add_space(8.0);
         let enabled = match self.op {
             Op::Music => self.music.info.as_ref().is_some_and(|m| m.has_audio()),
             Op::Volume => self.db.abs() >= 0.05,
             _ => true,
         };
-        if footer(ui, enabled, &labeled(I_SAVE, "Save")) {
+        if action_button(ui, enabled, &labeled(I_SAVE, "Save…")) {
             match self.op {
                 Op::Extract => {
                     let track = self.track.min(info.audio.len().saturating_sub(1));

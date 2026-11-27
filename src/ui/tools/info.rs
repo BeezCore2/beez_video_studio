@@ -1,22 +1,29 @@
 //! Media Info: everything ffprobe knows about a file.
 
-use eframe::egui::{self, Sense, Vec2};
+use eframe::egui;
 
 use super::*;
-use crate::ui::media::{Frames, Source, media_ext};
 use crate::video::human_size;
 use crate::video::probe::{fmt_bitrate, fmt_fps};
 
 #[derive(Default)]
-pub struct InfoState {
-    pub src: Source,
+pub struct InfoState;
+
+/// A metadata tag key as a label: `creation_time` → `Creation time`.
+fn tag_label(key: &str) -> String {
+    let words = key.replace('_', " ").to_lowercase();
+    let mut c = words.chars();
+    match c.next() {
+        Some(first) => first.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
 }
 
 /// Rows of (label, value) grouped in sections.
 fn report(i: &MediaInfo) -> Vec<(String, Vec<(String, String)>)> {
     let mut out = Vec::new();
     let mut general = vec![
-        ("File".to_string(), i.path.display().to_string()),
+        ("File".to_string(), file_name(&i.path)),
         ("Size".into(), human_size(i.size)),
         ("Duration".into(), fmt_time(i.duration, true)),
         (
@@ -32,7 +39,7 @@ fn report(i: &MediaInfo) -> Vec<(String, Vec<(String, String)>)> {
             k.to_lowercase().as_str(),
             "title" | "artist" | "album" | "creation_time" | "encoder" | "comment" | "date"
         ) {
-            general.push((k.replace('_', " "), v.clone()));
+            general.push((tag_label(k), v.clone()));
         }
     }
     out.push(("General".to_string(), general));
@@ -122,35 +129,30 @@ fn report(i: &MediaInfo) -> Vec<(String, Vec<(String, String)>)> {
 }
 
 impl InfoState {
-    pub fn ui(&mut self, ui: &mut egui::Ui, frames: &mut Frames, _caps: &Caps) -> Option<Task> {
-        section(ui, "File");
-        self.src.ui(ui, frames, "video or audio file", &media_ext());
-        let info = self.src.info.clone()?;
-        if info.has_video() {
-            card(ui, |ui| {
-                let (rect, _) =
-                    ui.allocate_exact_size(Vec2::new(ui.available_width(), 260.0), Sense::hover());
-                frames.paint(ui, &info.path, self.src.poster_time(), 640, rect);
-            });
-        }
+    pub fn ui(&mut self, ui: &mut egui::Ui, cx: &Ctx) -> Option<Task> {
+        let info = require(ui, cx, false)?.clone();
         let rep = report(&info);
         for (title, rows) in &rep {
-            section(ui, title);
-            card(ui, |ui| {
-                egui::Grid::new(title)
-                    .num_columns(2)
-                    .spacing([24.0, 6.0])
-                    .show(ui, |ui| {
-                        for (k, v) in rows {
-                            ui.label(secondary(ui, k.as_str()));
-                            ui.add(egui::Label::new(v.as_str()).wrap());
-                            ui.end_row();
-                        }
-                    });
-            });
+            group(ui, title);
+            egui::Grid::new(title)
+                .num_columns(2)
+                .spacing([12.0, 4.0])
+                .show(ui, |ui| {
+                    for (k, v) in rows {
+                        ui.label(secondary(ui, k.as_str()).size(12.0));
+                        ui.add(egui::Label::new(egui::RichText::new(v.as_str()).size(12.0)).wrap());
+                        ui.end_row();
+                    }
+                });
         }
-        ui.add_space(8.0);
-        if ui.button(labeled(I_COPY, "Copy as text")).clicked() {
+        ui.add_space(10.0);
+        if ui
+            .add(
+                egui::Button::new(labeled(I_COPY, "Copy as text"))
+                    .min_size(egui::Vec2::new(ui.available_width(), 30.0)),
+            )
+            .clicked()
+        {
             let text: String = rep
                 .iter()
                 .map(|(t, rows)| {
@@ -161,5 +163,17 @@ impl InfoState {
             ui.ctx().copy_text(text);
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tag_labels_read_like_words() {
+        assert_eq!(tag_label("encoder"), "Encoder");
+        assert_eq!(tag_label("creation_time"), "Creation time");
+        assert_eq!(tag_label("TITLE"), "Title");
     }
 }

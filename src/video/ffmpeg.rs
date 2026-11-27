@@ -136,6 +136,27 @@ pub fn command(program: &Path) -> Command {
     cmd
 }
 
+/// A short, readable FFmpeg version: `7.1`, or `nightly 2026-11-26` for builds from
+/// the development branch (`N-129308-g17de9f8597-20261126`), or the date of dated builds.
+pub fn friendly_version(v: &str) -> String {
+    if let Some(rest) = v.strip_prefix("N-")
+        && let Some(date) = rest.rsplit('-').next()
+        && date.len() == 8
+        && date.chars().all(|c| c.is_ascii_digit())
+    {
+        return format!("nightly {}-{}-{}", &date[..4], &date[4..6], &date[6..]);
+    }
+    let b = v.as_bytes();
+    if b.len() >= 10 && b[4] == b'-' && b[7] == b'-' && b[..4].iter().all(u8::is_ascii_digit) {
+        return v[..10].to_string();
+    }
+    let v = v
+        .strip_prefix('n')
+        .filter(|r| r.starts_with(|c: char| c.is_ascii_digit()))
+        .unwrap_or(v);
+    v.split('-').next().unwrap_or(v).to_string()
+}
+
 /// First line of `ffmpeg -version`, e.g. "ffmpeg version 7.1 Copyright …".
 pub fn version(t: &Tools) -> Option<String> {
     let out = command(&t.ffmpeg).arg("-version").output().ok()?;
@@ -443,6 +464,64 @@ pub fn grab_frame(path: &Path, secs: f64, width: u32) -> Result<Vec<u8>> {
     Ok(out.stdout)
 }
 
+/// The first audio track drawn as a waveform (PNG, transparent background), `w × h`.
+pub fn waveform(path: &Path, w: u32, h: u32, color: &str) -> Result<Vec<u8>> {
+    let t = require()?;
+    let out = command(&t.ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(path)
+        .arg("-filter_complex")
+        .arg(format!(
+            "[0:a:0]aformat=channel_layouts=mono,showwavespic=s={w}x{h}:colors={color}[w]"
+        ))
+        .args([
+            "-map",
+            "[w]",
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-c:v",
+            "png",
+            "-",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .context("Could not start FFmpeg")?;
+    if out.stdout.is_empty() {
+        bail!(
+            "{}",
+            explain(&String::from_utf8_lossy(&out.stderr), out.status.code())
+        );
+    }
+    Ok(out.stdout)
+}
+
+/// Start a real-time preview: FFmpeg decodes from `from` seconds at the file's own pace
+/// (`-re`) and writes raw RGBA frames of `w × h` at `fps` to stdout. Kill the child to stop.
+pub fn spawn_preview(
+    path: &Path,
+    from: f64,
+    w: u32,
+    h: u32,
+    fps: f64,
+) -> Result<std::process::Child> {
+    let t = require()?;
+    command(&t.ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-re"])
+        .args(["-ss", &format!("{:.3}", from.max(0.0))])
+        .arg("-i")
+        .arg(path)
+        .args(["-map", "0:v:0", "-an", "-sn", "-vf"])
+        .arg(format!("fps={fps:.3},scale={w}:{h}:flags=bilinear"))
+        .args(["-pix_fmt", "rgba", "-f", "rawvideo", "-"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("Could not start FFmpeg")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,6 +537,16 @@ mod tests {
 
     #[test]
     fn eta_format() {
+        assert_eq!(
+            friendly_version("N-129308-g17de9f8597-20261126"),
+            "nightly 2026-11-26"
+        );
+        assert_eq!(friendly_version("7.1"), "7.1");
+        assert_eq!(friendly_version("n7.1-12-gabcdef"), "7.1");
+        assert_eq!(
+            friendly_version("2025-03-01-git-abc-full_build-www.gyan.dev"),
+            "2025-03-01"
+        );
         assert_eq!(format_eta(5.4), "0:05");
         assert_eq!(format_eta(125.0), "2:05");
         assert_eq!(format_eta(3725.0), "1:02:05");

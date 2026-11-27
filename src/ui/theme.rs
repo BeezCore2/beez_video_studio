@@ -8,7 +8,6 @@ use eframe::egui::{
 use std::sync::Arc;
 
 // --- Segoe Fluent Icons code points (same values in Segoe MDL2 Assets on Windows 10) ---
-pub const I_BACK: &str = "\u{E72B}";
 pub const I_ADD: &str = "\u{E710}";
 pub const I_CLOSE: &str = "\u{E711}";
 pub const I_DELETE: &str = "\u{E74D}";
@@ -24,7 +23,6 @@ pub const I_SAVE: &str = "\u{E74E}";
 pub const I_INFO: &str = "\u{E946}";
 pub const I_PHOTO: &str = "\u{EB9F}";
 pub const I_CUT: &str = "\u{E8C6}";
-pub const I_GRID: &str = "\u{E8A9}";
 pub const I_PACKAGE: &str = "\u{E7B8}";
 pub const I_MERGE: &str = "\u{E8F1}";
 pub const I_SUN: &str = "\u{E706}";
@@ -36,14 +34,17 @@ pub const I_UPLOAD: &str = "\u{E898}";
 pub const I_DOWNLOAD: &str = "\u{E896}";
 pub const I_VIDEO: &str = "\u{E714}";
 pub const I_PLAY: &str = "\u{E768}";
+pub const I_PAUSE: &str = "\u{E769}";
+pub const I_PREV: &str = "\u{E892}";
+pub const I_NEXT: &str = "\u{E893}";
+pub const I_LEFT: &str = "\u{E76B}";
+pub const I_IMPORT: &str = "\u{E8B5}";
 pub const I_AUDIO: &str = "\u{E8D6}";
-pub const I_VOLUME: &str = "\u{E767}";
 pub const I_CAMERA: &str = "\u{E722}";
 pub const I_CONVERT: &str = "\u{E8AB}";
 pub const I_RESIZE: &str = "\u{E740}";
 pub const I_SPEED: &str = "\u{EC4A}";
 pub const I_CLOCK: &str = "\u{E916}";
-pub const I_SETTINGS: &str = "\u{E713}";
 pub const I_FLASH: &str = "\u{E945}";
 
 pub fn semibold() -> FontFamily {
@@ -100,18 +101,23 @@ pub fn install_fonts(ctx: &egui::Context) {
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub dark: bool,
-    pub bg: Color32,
+    /// Side panels, top bar, timeline, status bar.
+    pub panel: Color32,
+    /// The deep area around the viewer.
+    pub well: Color32,
+    /// Raised surfaces: cards, inputs, unselected controls.
     pub card: Color32,
     pub card_hover: Color32,
     pub border: Color32,
     pub text: Color32,
     pub text2: Color32,
+    /// Honey: actions, selection, the In–Out range.
     pub accent: Color32,
     pub on_accent: Color32,
+    /// The playhead (cream, distinct from the honey range).
+    pub playhead: Color32,
     pub success: Color32,
-    pub success_bg: Color32,
     pub error: Color32,
-    pub error_bg: Color32,
 }
 
 impl Palette {
@@ -119,34 +125,34 @@ impl Palette {
         if dark {
             Self {
                 dark,
-                bg: Color32::from_rgb(0x20, 0x20, 0x20),
-                card: Color32::from_rgb(0x2B, 0x2B, 0x2B),
-                card_hover: Color32::from_rgb(0x32, 0x32, 0x32),
-                border: Color32::from_rgb(0x1C, 0x1C, 0x1C),
-                text: Color32::from_rgb(0xFF, 0xFF, 0xFF),
-                text2: Color32::from_rgb(0xC5, 0xC5, 0xC5),
-                accent: Color32::from_rgb(0x60, 0xCD, 0xFF),
-                on_accent: Color32::BLACK,
-                success: Color32::from_rgb(0x6C, 0xCB, 0x5F),
-                success_bg: Color32::from_rgb(0x39, 0x3D, 0x1B),
-                error: Color32::from_rgb(0xFF, 0x99, 0xA4),
-                error_bg: Color32::from_rgb(0x44, 0x27, 0x26),
+                panel: Color32::from_rgb(0x1C, 0x1B, 0x19),
+                well: Color32::from_rgb(0x12, 0x11, 0x10),
+                card: Color32::from_rgb(0x27, 0x25, 0x22),
+                card_hover: Color32::from_rgb(0x30, 0x2D, 0x29),
+                border: Color32::from_rgb(0x36, 0x32, 0x2D),
+                text: Color32::from_rgb(0xED, 0xE9, 0xE3),
+                text2: Color32::from_rgb(0xA6, 0x9F, 0x96),
+                accent: Color32::from_rgb(0xF2, 0xA9, 0x3B),
+                on_accent: Color32::from_rgb(0x22, 0x16, 0x05),
+                playhead: Color32::from_rgb(0xFF, 0xF3, 0xDC),
+                success: Color32::from_rgb(0x5F, 0xCB, 0x8A),
+                error: Color32::from_rgb(0xF2, 0x84, 0x7C),
             }
         } else {
             Self {
                 dark,
-                bg: Color32::from_rgb(0xF3, 0xF3, 0xF3),
-                card: Color32::from_rgb(0xFB, 0xFB, 0xFB),
-                card_hover: Color32::from_rgb(0xF6, 0xF6, 0xF6),
-                border: Color32::from_rgb(0xE5, 0xE5, 0xE5),
-                text: Color32::from_rgb(0x1A, 0x1A, 0x1A),
-                text2: Color32::from_rgb(0x5D, 0x5D, 0x5D),
-                accent: Color32::from_rgb(0x00, 0x5F, 0xB8),
+                panel: Color32::from_rgb(0xF4, 0xF3, 0xF0),
+                well: Color32::from_rgb(0xDC, 0xD9, 0xD4),
+                card: Color32::WHITE,
+                card_hover: Color32::from_rgb(0xFA, 0xF8, 0xF4),
+                border: Color32::from_rgb(0xD8, 0xD4, 0xCD),
+                text: Color32::from_rgb(0x1D, 0x1B, 0x18),
+                text2: Color32::from_rgb(0x5F, 0x59, 0x51),
+                accent: Color32::from_rgb(0xA8, 0x64, 0x00),
                 on_accent: Color32::WHITE,
-                success: Color32::from_rgb(0x0F, 0x7B, 0x0F),
-                success_bg: Color32::from_rgb(0xDF, 0xF6, 0xDD),
-                error: Color32::from_rgb(0xC4, 0x2B, 0x1C),
-                error_bg: Color32::from_rgb(0xFD, 0xE7, 0xE9),
+                playhead: Color32::from_rgb(0x1D, 0x1B, 0x18),
+                success: Color32::from_rgb(0x1B, 0x7F, 0x46),
+                error: Color32::from_rgb(0xB4, 0x2A, 0x1E),
             }
         }
     }
@@ -188,54 +194,32 @@ fn visuals(dark: bool) -> egui::Visuals {
     };
     let r4 = CornerRadius::same(4);
 
-    v.panel_fill = p.bg;
+    v.panel_fill = p.panel;
     v.window_fill = p.card;
     v.window_stroke = Stroke::new(1.0, p.border);
     v.window_corner_radius = CornerRadius::same(8);
-    v.faint_bg_color = if dark {
-        Color32::from_rgb(0x27, 0x27, 0x27)
-    } else {
-        Color32::from_rgb(0xF7, 0xF7, 0xF7)
-    };
+    v.faint_bg_color = p.card;
+    // Text fields and other "wells".
     v.extreme_bg_color = if dark {
-        Color32::from_rgb(0x1F, 0x1F, 0x1F)
+        Color32::from_rgb(0x14, 0x13, 0x11)
     } else {
         Color32::WHITE
     };
     v.hyperlink_color = p.accent;
-    v.selection.bg_fill = p.accent.gamma_multiply(if dark { 0.45 } else { 0.25 });
-    v.selection.stroke = Stroke::new(1.0, p.accent);
+    v.selection.bg_fill = p.accent.gamma_multiply(if dark { 0.35 } else { 0.22 });
+    v.selection.stroke = Stroke::new(1.0, p.text);
 
-    let control = if dark {
-        Color32::from_rgb(0x2D, 0x2D, 0x2D)
-    } else {
-        Color32::from_rgb(0xFB, 0xFB, 0xFB)
-    };
-    let control_hover = if dark {
-        Color32::from_rgb(0x33, 0x33, 0x33)
-    } else {
-        Color32::from_rgb(0xF5, 0xF5, 0xF5)
-    };
+    let control = p.card;
+    let control_hover = p.card_hover;
     let control_press = if dark {
-        Color32::from_rgb(0x28, 0x28, 0x28)
+        Color32::from_rgb(0x22, 0x20, 0x1D)
     } else {
-        Color32::from_rgb(0xF0, 0xF0, 0xF0)
+        Color32::from_rgb(0xF0, 0xEE, 0xEA)
     };
-    let stroke = if dark {
-        Color32::from_rgb(0x3A, 0x3A, 0x3A)
-    } else {
-        Color32::from_rgb(0xD9, 0xD9, 0xD9)
-    };
+    let stroke = p.border;
 
     let w = &mut v.widgets;
-    w.noninteractive.bg_stroke = Stroke::new(
-        1.0,
-        if dark {
-            Color32::from_rgb(0x33, 0x33, 0x33)
-        } else {
-            p.border
-        },
-    );
+    w.noninteractive.bg_stroke = Stroke::new(1.0, p.border);
     w.noninteractive.fg_stroke = Stroke::new(1.0, p.text);
     w.noninteractive.corner_radius = r4;
     for (wv, bg) in [
@@ -259,10 +243,6 @@ fn visuals(dark: bool) -> egui::Visuals {
 // ---------------------------------------------------------------------------------------
 // Widgets
 // ---------------------------------------------------------------------------------------
-
-pub fn title(text: &str) -> RichText {
-    RichText::new(text).family(semibold()).size(28.0)
-}
 
 pub fn subtitle(text: &str) -> RichText {
     RichText::new(text).family(semibold()).size(20.0)
@@ -319,58 +299,6 @@ pub fn icon_button(ui: &mut egui::Ui, enabled: bool, icon: &str, tip: &str) -> b
         .frame_when_inactive(false)
         .min_size(Vec2::splat(30.0));
     ui.add_enabled(enabled, btn).on_hover_text(tip).clicked()
-}
-
-/// A Fluent card: subtle filled surface with a 1px border and 8px corners.
-pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    let p = Palette::current(ui);
-    let r = egui::Frame::new()
-        .fill(p.card)
-        .stroke(Stroke::new(1.0, p.border))
-        .corner_radius(8.0)
-        .inner_margin(Margin::symmetric(20, 16))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            add(ui)
-        })
-        .inner;
-    ui.add_space(4.0);
-    r
-}
-
-/// Section heading above a group of cards.
-pub fn section(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(14.0);
-    ui.label(strong(text).size(15.0));
-    ui.add_space(2.0);
-}
-
-/// Windows Settings style row: title + description on the left, control on the right.
-pub fn setting<R>(
-    ui: &mut egui::Ui,
-    icon: &str,
-    name: &str,
-    desc: &str,
-    control: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
-    card(ui, |ui| {
-        ui.horizontal(|ui| {
-            if !icon.is_empty() {
-                ui.label(RichText::new(icon).size(18.0));
-                ui.add_space(10.0);
-            }
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(name);
-                if !desc.is_empty() {
-                    caption(ui, desc);
-                }
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control)
-                .inner
-        })
-        .inner
-    })
 }
 
 /// "Drop files here or click to browse" area, like on the Home screen. It lights up while
@@ -470,4 +398,71 @@ pub fn drop_zone(ui: &mut egui::Ui, height: f32, title: &str, subtitle: &str) ->
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
+}
+
+// ---------------------------------------------------------------------------------------
+// Compact inspector widgets (narrow side panels)
+// ---------------------------------------------------------------------------------------
+
+/// A labelled control stacked vertically: small bold label, the control at full width,
+/// and an optional hint underneath.
+pub fn field<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    hint: &str,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    ui.label(strong(label).size(13.0));
+    let r = add(ui);
+    if !hint.is_empty() {
+        ui.add(egui::Label::new(secondary(ui, hint).size(11.5)).wrap());
+    }
+    ui.add_space(8.0);
+    r
+}
+
+/// A small uppercase group heading inside a side panel.
+pub fn group(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(8.0);
+    ui.label(strong(text).size(13.5).color(Palette::current(ui).text2));
+    ui.add_space(2.0);
+}
+
+/// Full-width filled accent button (the inspector's main action).
+pub fn action_button(ui: &mut egui::Ui, enabled: bool, text: &str) -> bool {
+    let p = Palette::current(ui);
+    let fill = if enabled {
+        p.accent
+    } else {
+        p.accent.gamma_multiply(0.4)
+    };
+    let btn = egui::Button::new(strong(text).color(p.on_accent))
+        .fill(fill)
+        .stroke(Stroke::NONE)
+        .corner_radius(4.0)
+        .min_size(Vec2::new(ui.available_width(), 38.0));
+    ui.add_enabled(enabled, btn).clicked()
+}
+
+/// Background of the editor's panels.
+pub fn panel_fill(ui: &egui::Ui) -> Color32 {
+    Palette::current(ui).panel
+}
+
+/// A framed choice button: honey fill with dark text when selected, a normal framed
+/// control otherwise (so every option visibly reads as clickable).
+pub fn toggle(ui: &mut egui::Ui, selected: bool, text: &str, width: f32) -> bool {
+    let p = Palette::current(ui);
+    let label = if selected {
+        strong(text).color(p.on_accent)
+    } else {
+        RichText::new(text).color(p.text)
+    };
+    let mut btn = egui::Button::new(label)
+        .corner_radius(4.0)
+        .min_size(Vec2::new(width, 30.0));
+    if selected {
+        btn = btn.fill(p.accent).stroke(Stroke::NONE);
+    }
+    ui.add(btn).clicked()
 }
