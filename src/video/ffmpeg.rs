@@ -443,6 +443,64 @@ pub fn grab_frame(path: &Path, secs: f64, width: u32) -> Result<Vec<u8>> {
     Ok(out.stdout)
 }
 
+/// The first audio track drawn as a waveform (PNG, transparent background), `w × h`.
+pub fn waveform(path: &Path, w: u32, h: u32, color: &str) -> Result<Vec<u8>> {
+    let t = require()?;
+    let out = command(&t.ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(path)
+        .arg("-filter_complex")
+        .arg(format!(
+            "[0:a:0]aformat=channel_layouts=mono,showwavespic=s={w}x{h}:colors={color}[w]"
+        ))
+        .args([
+            "-map",
+            "[w]",
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-c:v",
+            "png",
+            "-",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .context("Could not start FFmpeg")?;
+    if out.stdout.is_empty() {
+        bail!(
+            "{}",
+            explain(&String::from_utf8_lossy(&out.stderr), out.status.code())
+        );
+    }
+    Ok(out.stdout)
+}
+
+/// Start a real-time preview: FFmpeg decodes from `from` seconds at the file's own pace
+/// (`-re`) and writes raw RGBA frames of `w × h` at `fps` to stdout. Kill the child to stop.
+pub fn spawn_preview(
+    path: &Path,
+    from: f64,
+    w: u32,
+    h: u32,
+    fps: f64,
+) -> Result<std::process::Child> {
+    let t = require()?;
+    command(&t.ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-re"])
+        .args(["-ss", &format!("{:.3}", from.max(0.0))])
+        .arg("-i")
+        .arg(path)
+        .args(["-map", "0:v:0", "-an", "-sn", "-vf"])
+        .arg(format!("fps={fps:.3},scale={w}:{h}:flags=bilinear"))
+        .args(["-pix_fmt", "rgba", "-f", "rawvideo", "-"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("Could not start FFmpeg")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

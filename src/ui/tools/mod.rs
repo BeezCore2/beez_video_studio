@@ -1,5 +1,6 @@
-//! One state struct + `ui` method per tool. A `ui` method returns a [`Task`] when the
-//! user presses the main action; the shell runs it on a background thread.
+//! The inspector's tools. Each has a state struct whose `ui` draws its settings for the
+//! selected clip and returns a [`Task`] when the user presses its action button; the app
+//! runs it on a background thread.
 
 mod audio;
 mod compress;
@@ -28,12 +29,13 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use eframe::egui::{self, RichText, Vec2};
 
-use super::media::{Frames, Source, file_name, media_row, pick_files};
+use super::bin::Clip;
+use super::media::file_name;
 use super::theme::*;
 use crate::video::codec::{Backend, VideoCodec};
 use crate::video::ffmpeg::Caps;
 use crate::video::job::{self, Job};
-use crate::video::probe::{MediaInfo, fmt_time, parse_time};
+use crate::video::probe::{MediaInfo, fmt_time};
 use crate::video::progress::Progress;
 
 /// Background work: a label for the progress bar and the job itself.
@@ -51,44 +53,64 @@ pub fn job_task(label: &str, job: Result<Job>) -> Option<Task> {
     task(label, move |pr| job::execute(job?, pr))
 }
 
+/// What a tool works on.
+pub struct Ctx<'a> {
+    /// The clip selected in the bin.
+    pub clip: Option<&'a Clip>,
+    /// Every clip in the bin, in order.
+    pub clips: &'a [Clip],
+    pub caps: &'a Caps,
+}
+
+impl Ctx<'_> {
+    /// Clips that have been read and contain video.
+    pub fn videos(&self) -> Vec<MediaInfo> {
+        self.clips
+            .iter()
+            .filter_map(|c| c.info().filter(|i| i.has_video()).cloned())
+            .collect()
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tool {
     Compress,
     Convert,
-    Gif,
     Trim,
-    Join,
     Transform,
     Speed,
     Audio,
+    Gif,
     Frames,
+    Join,
     Info,
 }
 
 impl Tool {
-    pub const GROUPS: [(&'static str, &'static [Tool]); 3] = [
-        (
-            "Compress & convert",
-            &[Tool::Compress, Tool::Convert, Tool::Gif],
-        ),
-        (
-            "Edit",
-            &[Tool::Trim, Tool::Join, Tool::Transform, Tool::Speed],
-        ),
-        ("Audio & more", &[Tool::Audio, Tool::Frames, Tool::Info]),
+    pub const ALL: [Tool; 10] = [
+        Tool::Compress,
+        Tool::Convert,
+        Tool::Trim,
+        Tool::Transform,
+        Tool::Speed,
+        Tool::Audio,
+        Tool::Gif,
+        Tool::Frames,
+        Tool::Join,
+        Tool::Info,
     ];
 
     pub fn name(self) -> &'static str {
         match self {
-            Tool::Compress => "Compress Video",
-            Tool::Convert => "Convert Format",
-            Tool::Gif => "Video to GIF",
+            Tool::Compress => "Compress",
+            Tool::Convert => "Convert",
             Tool::Trim => "Trim & Cut",
-            Tool::Join => "Join Videos",
             Tool::Transform => "Resize & Rotate",
-            Tool::Speed => "Change Speed",
-            Tool::Audio => "Audio Tools",
+            Tool::Speed => "Speed",
+            Tool::Audio => "Audio",
+            Tool::Gif => "GIF / WebP",
             Tool::Frames => "Save Frames",
+            Tool::Join => "Join Clips",
             Tool::Info => "Media Info",
         }
     }
@@ -97,39 +119,35 @@ impl Tool {
         match self {
             Tool::Compress => I_PACKAGE,
             Tool::Convert => I_CONVERT,
-            Tool::Gif => I_PHOTO,
             Tool::Trim => I_CUT,
-            Tool::Join => I_MERGE,
             Tool::Transform => I_ROTATE,
             Tool::Speed => I_SPEED,
             Tool::Audio => I_AUDIO,
+            Tool::Gif => I_PHOTO,
             Tool::Frames => I_CAMERA,
+            Tool::Join => I_MERGE,
             Tool::Info => I_INFO,
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
-            Tool::Compress => "Make videos smaller: pick a quality level or an exact target size.",
-            Tool::Convert => {
-                "Change to MP4, MKV, WebM, MOV, AVI or audio. Copies streams when it can."
-            }
-            Tool::Gif => "Turn a clip into a sharp, small animated GIF or WebP.",
-            Tool::Trim => "Keep a part of a video, or cut a section out of it.",
-            Tool::Join => "Put several clips together into one video.",
-            Tool::Transform => {
-                "Change the resolution, rotate, flip, crop to 9:16 or 1:1, change fps."
-            }
-            Tool::Speed => "Speed up or slow down, with natural-sounding audio.",
-            Tool::Audio => "Extract, remove, normalize loudness, change volume or add music.",
-            Tool::Frames => "Save a still image, a series of frames or a contact sheet.",
-            Tool::Info => "See codecs, resolution, frame rate, bitrates and tracks.",
+            Tool::Compress => "Make the video smaller: a quality level or an exact size.",
+            Tool::Convert => "Change the format. Streams are copied when possible.",
+            Tool::Trim => "Export the In–Out range of the timeline, or cut it out.",
+            Tool::Transform => "Resolution, rotation, flips, crop to a shape, frame rate.",
+            Tool::Speed => "Speed up or slow down, with natural-sounding voices.",
+            Tool::Audio => "Extract, remove, normalize, change volume or add music.",
+            Tool::Gif => "Turn the In–Out range into an animated GIF or WebP.",
+            Tool::Frames => "Save the current frame, a series, or a contact sheet.",
+            Tool::Join => "Join all clips in the media bin, top to bottom.",
+            Tool::Info => "Codecs, resolution, frame rate, bitrates and tracks.",
         }
     }
 }
 
 // ---------------------------------------------------------------------------------------
-// Helpers
+// Files
 // ---------------------------------------------------------------------------------------
 
 /// Ask where to save; suggests `<input stem>_<suffix>.<ext>` next to the input.
@@ -169,6 +187,24 @@ pub fn output_in(dir: &Path, input: &Path, suffix: &str, ext: &str, taken: &[Pat
         n += 1;
     }
     p
+}
+
+/// Plan output names for a batch (unique within the batch).
+pub fn batch_outputs(
+    infos: Vec<MediaInfo>,
+    dir: &Path,
+    suffix: &str,
+    ext: impl Fn(&MediaInfo) -> String,
+) -> Vec<(MediaInfo, PathBuf)> {
+    let mut taken: Vec<PathBuf> = Vec::new();
+    infos
+        .into_iter()
+        .map(|i| {
+            let out = output_in(dir, &i.path, suffix, &ext(&i), &taken);
+            taken.push(out.clone());
+            (i, out)
+        })
+        .collect()
 }
 
 /// Run one job per file, one after another, sharing the progress bar.
@@ -212,97 +248,24 @@ pub fn batch_task(
     })
 }
 
-/// Plan output names for a batch (unique within the batch).
-pub fn batch_outputs(
-    infos: Vec<MediaInfo>,
-    dir: &Path,
-    suffix: &str,
-    ext: impl Fn(&MediaInfo) -> String,
-) -> Vec<(MediaInfo, PathBuf)> {
-    let mut taken: Vec<PathBuf> = Vec::new();
-    infos
-        .into_iter()
-        .map(|i| {
-            let out = output_in(dir, &i.path, suffix, &ext(&i), &taken);
-            taken.push(out.clone());
-            (i, out)
-        })
-        .collect()
+/// The extension of `info`'s file when it is a container we can write, else `fallback`.
+pub fn same_ext_or(info: &MediaInfo, fallback: &str) -> String {
+    let ext = info
+        .path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    match crate::video::codec::Container::from_ext(&ext) {
+        Some(c) => c.ext().to_string(),
+        None => fallback.to_string(),
+    }
 }
 
-/// The list of input files of a multi-file tool, with Add / Clear. `reorder` adds up/down
-/// buttons. Returns true when the list changed.
-pub fn file_list(
-    ui: &mut egui::Ui,
-    frames: &mut Frames,
-    files: &mut Vec<Source>,
-    what: &str,
-    ext: &[&str],
-    empty_hint: &str,
-    reorder: bool,
-) -> bool {
-    let ctx = ui.ctx().clone();
-    let mut changed = false;
-    let add = |files: &mut Vec<Source>, paths: Vec<PathBuf>| {
-        for p in paths {
-            files.push(Source::new(p, &ctx));
-        }
-    };
-    if files.is_empty() {
-        if drop_zone(
-            ui,
-            170.0,
-            &format!("Drop {what} here or click to browse"),
-            empty_hint,
-        ) {
-            add(files, pick_files(what, ext));
-            changed = true;
-        }
-        return changed;
-    }
-    let n = files.len();
-    let mut action: Option<(usize, i32)> = None;
-    for (i, f) in files.iter_mut().enumerate() {
-        f.poll();
-        media_row(ui, frames, f, |ui| {
-            if icon_button(ui, true, I_DELETE, "Remove") {
-                action = Some((i, 0));
-            }
-            if reorder {
-                if icon_button(ui, i + 1 < n, I_DOWN, "Move down") {
-                    action = Some((i, 1));
-                }
-                if icon_button(ui, i > 0, I_UP, "Move up") {
-                    action = Some((i, -1));
-                }
-            }
-        });
-    }
-    match action {
-        Some((i, 0)) => {
-            files.remove(i);
-            changed = true;
-        }
-        Some((i, d)) => {
-            files.swap(i, (i as i32 + d) as usize);
-            changed = true;
-        }
-        None => {}
-    }
-    ui.horizontal(|ui| {
-        if ui.button(labeled(I_ADD, &format!("Add {what}…"))).clicked() {
-            add(files, pick_files(what, ext));
-            changed = true;
-        }
-        if command(ui, !files.is_empty(), I_CLEAR, "Clear") {
-            files.clear();
-            changed = true;
-        }
-    });
-    changed
-}
+// ---------------------------------------------------------------------------------------
+// Compact controls (the inspector is a narrow column)
+// ---------------------------------------------------------------------------------------
 
-/// A dropdown.
+/// A full-width dropdown.
 pub fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, value: &mut T, items: &[(T, &str)]) {
     let current = items
         .iter()
@@ -311,6 +274,7 @@ pub fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, value: &mut T, it
         .unwrap_or("Custom");
     egui::ComboBox::from_id_salt(id)
         .selected_text(current)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for (v, l) in items {
                 ui.selectable_value(value, *v, *l);
@@ -318,76 +282,59 @@ pub fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, value: &mut T, it
         });
 }
 
-/// A row of toggle buttons (one selected).
+/// Toggle buttons sharing the row's width (wraps when there are many).
 pub fn segmented<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
     items: &[(T, &str)],
-    min_w: f32,
 ) -> bool {
     let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        for (v, l) in items {
-            let btn = egui::Button::selectable(*value == *v, *l).min_size(Vec2::new(min_w, 32.0));
-            if ui.add(btn).clicked() && *value != *v {
-                *value = *v;
-                changed = true;
+    let per_row = items.len().min(if items.len() > 4 { 3 } else { 4 });
+    let gap = ui.spacing().item_spacing.x;
+    let w = ((ui.available_width() - gap * (per_row as f32 - 1.0)) / per_row as f32).floor();
+    for row in items.chunks(per_row) {
+        ui.horizontal(|ui| {
+            for (v, l) in row {
+                let btn = egui::Button::selectable(*value == *v, *l).min_size(Vec2::new(w, 30.0));
+                if ui.add(btn).clicked() && *value != *v {
+                    *value = *v;
+                    changed = true;
+                }
             }
-        }
-    });
+        });
+    }
     changed
 }
 
-/// Big two-line choice buttons (title + description), like the compression levels.
-pub fn big_choices<T: PartialEq + Copy>(
+/// A vertical list of two-line choices (title + description).
+pub fn choice_list<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
     items: &[(T, &str, &str)],
 ) -> bool {
     let mut changed = false;
-    let w = ((ui.available_width() - 8.0 * (items.len() as f32 - 1.0)) / items.len() as f32)
-        .clamp(120.0, 220.0);
-    ui.horizontal_wrapped(|ui| {
-        for (v, name, desc) in items {
-            let text = format!("{name}\n{desc}");
-            let btn = egui::Button::selectable(*value == *v, text).min_size(Vec2::new(w, 52.0));
-            if ui.add(btn).clicked() && *value != *v {
-                *value = *v;
-                changed = true;
-            }
-        }
-    });
-    changed
-}
-
-pub fn footer(ui: &mut egui::Ui, enabled: bool, text: &str) -> bool {
-    ui.add_space(16.0);
-    accent_button(ui, enabled, text)
-}
-
-/// A time entry (`1:23.5`). Updates `value` when the text parses and stays within
-/// `0..=max`; invalid text is shown in red.
-pub fn time_field(ui: &mut egui::Ui, text: &mut String, value: &mut f64, max: f64) -> bool {
     let p = Palette::current(ui);
-    let parsed = parse_time(text).filter(|t| max <= 0.0 || *t <= max + 1e-6);
-    let mut edit = egui::TextEdit::singleline(text)
-        .desired_width(110.0)
-        .hint_text("m:ss.mmm");
-    if parsed.is_none() {
-        edit = edit.text_color(p.error);
+    for (v, name, desc) in items {
+        let selected = *value == *v;
+        let mut job = egui::text::LayoutJob::default();
+        job.append(
+            name,
+            0.0,
+            egui::TextFormat::simple(egui::FontId::new(13.5, semibold()), p.text),
+        );
+        job.append(
+            &format!("\n{desc}"),
+            0.0,
+            egui::TextFormat::simple(egui::FontId::proportional(11.5), p.text2),
+        );
+        let btn =
+            egui::Button::selectable(selected, job).min_size(Vec2::new(ui.available_width(), 40.0));
+        if ui.add(btn).clicked() && !selected {
+            *value = *v;
+            changed = true;
+        }
     }
-    let r = ui.add(edit);
-    let mut changed = false;
-    if r.changed()
-        && let Some(t) = parse_time(text).filter(|t| max <= 0.0 || *t <= max + 1e-6)
-    {
-        *value = t;
-        changed = true;
-    }
-    if r.lost_focus() {
-        // Tidy the text to the canonical form.
-        *text = fmt_time(*value, true);
-    }
+    ui.add_space(4.0);
     changed
 }
 
@@ -401,7 +348,7 @@ pub fn codec_combo(
 ) {
     egui::ComboBox::from_id_salt(id)
         .selected_text(value.name())
-        .width(260.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for &c in choices {
                 let ok = caps.encoders.is_empty() || caps.has(c.software_encoder());
@@ -430,7 +377,7 @@ pub fn backend_combo(
     }
     egui::ComboBox::from_id_salt(id)
         .selected_text(value.name())
-        .width(260.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for b in usable {
                 ui.selectable_value(value, b, b.name());
@@ -438,29 +385,96 @@ pub fn backend_combo(
         });
 }
 
-/// One-line hint under a section.
+/// A wrapped one-line note with an icon.
 pub fn hint(ui: &mut egui::Ui, icon: &str, text: &str) {
-    ui.horizontal_wrapped(|ui| {
-        ui.label(secondary(ui, icon).size(13.0));
-        caption(ui, text);
-    });
+    ui.add(egui::Label::new(secondary(ui, format!("{icon}  {text}")).size(12.0)).wrap());
+    ui.add_space(4.0);
 }
 
-/// "Needs a video" message for tools that can't work on audio-only files.
-pub fn needs_video(ui: &mut egui::Ui, info: Option<&MediaInfo>) -> bool {
-    if let Some(i) = info
-        && !i.has_video()
-    {
-        let p = Palette::current(ui);
-        ui.label(
-            RichText::new(format!(
-                "{I_INFO}  This file has no video. Use Audio Tools for audio files."
-            ))
-            .color(p.error),
+/// A wrapped error note.
+pub fn error_note(ui: &mut egui::Ui, text: &str) {
+    let p = Palette::current(ui);
+    ui.add(
+        egui::Label::new(
+            RichText::new(format!("{I_ERROR}  {text}"))
+                .color(p.error)
+                .size(12.0),
+        )
+        .wrap(),
+    );
+    ui.add_space(4.0);
+}
+
+/// Shown when no clip is selected, or the tool needs something the clip doesn't have.
+/// Returns the clip's info when the tool can work.
+pub fn require<'a>(ui: &mut egui::Ui, cx: &'a Ctx, video: bool) -> Option<&'a MediaInfo> {
+    let Some(clip) = cx.clip else {
+        hint(ui, I_IMPORT, "Import a clip into the media bin to start.");
+        return None;
+    };
+    let Some(info) = clip.info() else {
+        match &clip.src.error {
+            Some(e) => error_note(ui, e),
+            None => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    caption(ui, "Reading the clip…");
+                });
+            }
+        }
+        return None;
+    };
+    if video && !info.has_video() {
+        error_note(
+            ui,
+            "This clip has no video. Use the Audio tool for audio files.",
         );
-        return true;
+        return None;
     }
-    false
+    Some(info)
+}
+
+/// "Apply to: This clip / All N clips" for batch-capable tools. Returns true for "all".
+pub fn apply_to(ui: &mut egui::Ui, all: &mut bool, n: usize) -> bool {
+    if n > 1 {
+        field(ui, "Apply to", "", |ui| {
+            let label = format!("All {n} clips");
+            segmented(ui, all, &[(false, "This clip"), (true, label.as_str())]);
+        });
+    } else {
+        *all = false;
+    }
+    *all
+}
+
+/// The In–Out range summary used by range-based tools.
+pub fn range_summary(ui: &mut egui::Ui, clip: &Clip) {
+    let p = Palette::current(ui);
+    egui::Frame::new()
+        .fill(p.accent.gamma_multiply(if p.dark { 0.12 } else { 0.08 }))
+        .corner_radius(6.0)
+        .inner_margin(10)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{}  →  {}",
+                        fmt_time(clip.range_in, true),
+                        fmt_time(clip.range_out, true)
+                    ))
+                    .monospace(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(strong(fmt_time(clip.range_out - clip.range_in, true)));
+                });
+            });
+            caption(
+                ui,
+                "Set the range on the timeline: drag the [ ] handles, or press I and O.",
+            );
+        });
+    ui.add_space(8.0);
 }
 
 #[cfg(test)]

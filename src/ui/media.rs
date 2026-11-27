@@ -7,13 +7,12 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 
 use eframe::egui::{
-    self, Align2, Color32, ColorImage, FontId, Pos2, Rect, Sense, Stroke, StrokeKind,
-    TextureHandle, TextureOptions, Vec2,
+    self, Align2, Color32, ColorImage, FontId, Pos2, Rect, TextureHandle, TextureOptions, Vec2,
 };
 
 use super::theme::*;
+use crate::video::ffmpeg;
 use crate::video::probe::{self, MediaInfo};
-use crate::video::{ffmpeg, human_size};
 
 pub const VIDEO_EXT: &[&str] = &[
     "mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "flv", "mpg", "mpeg", "ts", "mts", "m2ts",
@@ -25,12 +24,6 @@ pub const AUDIO_EXT: &[&str] = &[
 
 pub fn media_ext() -> Vec<&'static str> {
     [VIDEO_EXT, AUDIO_EXT].concat()
-}
-
-pub fn has_ext(p: &Path, ext: &[&str]) -> bool {
-    p.extension()
-        .map(|e| ext.iter().any(|x| e.eq_ignore_ascii_case(x)))
-        .unwrap_or(false)
 }
 
 pub fn file_name(p: &Path) -> String {
@@ -163,11 +156,6 @@ impl Frames {
         }
     }
 
-    /// Forget a file's frames (it may have changed on disk).
-    pub fn invalidate(&mut self, path: &Path) {
-        self.slots.retain(|k, _| k.0 != path);
-    }
-
     /// The frame at `secs`, `width` pixels wide; requested in the background if needed.
     /// Times are rounded to 0.1 s so nearby requests share a frame.
     pub fn get(
@@ -202,85 +190,138 @@ impl Frames {
     /// Paint the frame aspect-fit into `rect` (a placeholder while it loads).
     /// Returns the painted picture's rect.
     pub fn paint(&mut self, ui: &egui::Ui, path: &Path, secs: f64, width: u32, rect: Rect) -> Rect {
-        self.paint_transformed(ui, path, secs, width, rect, &View::default())
-    }
-
-    /// Like [`paint`](Self::paint), previewing a rotation, flips and centre crop.
-    pub fn paint_transformed(
-        &mut self,
-        ui: &egui::Ui,
-        path: &Path,
-        secs: f64,
-        width: u32,
-        rect: Rect,
-        view: &View,
-    ) -> Rect {
         if !ui.is_rect_visible(rect) {
             return rect;
         }
-        let p = Palette::current(ui);
         let ctx = ui.ctx().clone();
         let failed = self.failed(path);
         match self.get(&ctx, path, secs, width) {
-            Some(tex) => {
-                let [tw, th] = tex.size();
-                let (mut w, mut h) = (tw as f32, th as f32);
-                if view.rotate % 180 == 90 {
-                    std::mem::swap(&mut w, &mut h);
+            Some(tex) => paint_texture(ui.painter(), tex, rect, &View::default()),
+            None => paint_placeholder(ui, rect, failed),
+        }
+    }
+}
+
+/// Paint a texture aspect-fit into `rect` with a preview transform. Returns the picture rect.
+pub fn paint_texture(
+    painter: &egui::Painter,
+    tex: &TextureHandle,
+    rect: Rect,
+    view: &View,
+) -> Rect {
+    let [tw, th] = tex.size();
+    let (mut w, mut h) = (tw as f32, th as f32);
+    if view.rotate % 180 == 90 {
+        std::mem::swap(&mut w, &mut h);
+    }
+    let (x0, y0, x1, y1) = view.crop_frac(w, h);
+    let (w, h) = (w * (x1 - x0), h * (y1 - y0));
+    let s = (rect.width() / w).min(rect.height() / h);
+    let shown = Rect::from_center_size(rect.center(), Vec2::new(w * s, h * s));
+    let uv = view.uvs((x0, y0, x1, y1));
+    let mut mesh = egui::Mesh::with_texture(tex.id());
+    let corners = [
+        shown.left_top(),
+        shown.right_top(),
+        shown.right_bottom(),
+        shown.left_bottom(),
+    ];
+    for (pos, uv) in corners.iter().zip(uv) {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos: *pos,
+            uv,
+            color: Color32::WHITE,
+        });
+    }
+    mesh.indices.extend([0, 1, 2, 0, 2, 3]);
+    painter.add(egui::Shape::mesh(mesh));
+    shown
+}
+
+/// A grey 16:9 box while a frame loads (or a video icon when it failed).
+pub fn paint_placeholder(ui: &egui::Ui, rect: Rect, failed: bool) -> Rect {
+    let p = Palette::current(ui);
+    let shown = Rect::from_center_size(
+        rect.center(),
+        Vec2::new(rect.width().min(rect.height() * 16.0 / 9.0), rect.height()),
+    );
+    ui.painter().rect_filled(
+        shown,
+        4.0,
+        if p.dark {
+            Color32::from_gray(40)
+        } else {
+            Color32::from_gray(220)
+        },
+    );
+    ui.painter().text(
+        shown.center(),
+        Align2::CENTER_CENTER,
+        if failed { I_VIDEO } else { "…" },
+        FontId::proportional(18.0),
+        p.text2,
+    );
+    shown
+}
+
+// ---------------------------------------------------------------------------------------
+// Audio waveforms
+// ---------------------------------------------------------------------------------------
+
+/// Waveform images of clips' first audio track, made in the background.
+pub struct Waves {
+    slots: HashMap<PathBuf, Slot>,
+    tx: Sender<(PathBuf, Option<ColorImage>)>,
+    rx: Receiver<(PathBuf, Option<ColorImage>)>,
+}
+
+impl Default for Waves {
+    fn default() -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            slots: HashMap::new(),
+            tx,
+            rx,
+        }
+    }
+}
+
+impl Waves {
+    pub fn poll(&mut self, ctx: &egui::Context) {
+        while let Ok((path, img)) = self.rx.try_recv() {
+            let slot = match img {
+                Some(img) => {
+                    let name = format!("wave:{}", path.display());
+                    Slot::Ready(ctx.load_texture(name, img, TextureOptions::LINEAR))
                 }
-                let (x0, y0, x1, y1) = view.crop_frac(w, h);
-                let (w, h) = (w * (x1 - x0), h * (y1 - y0));
-                let s = (rect.width() / w).min(rect.height() / h);
-                let shown = Rect::from_center_size(rect.center(), Vec2::new(w * s, h * s));
-                let uv = view.uvs((x0, y0, x1, y1));
-                let mut mesh = egui::Mesh::with_texture(tex.id());
-                let corners = [
-                    shown.left_top(),
-                    shown.right_top(),
-                    shown.right_bottom(),
-                    shown.left_bottom(),
-                ];
-                for (pos, uv) in corners.iter().zip(uv) {
-                    mesh.vertices.push(egui::epaint::Vertex {
-                        pos: *pos,
-                        uv,
-                        color: Color32::WHITE,
+                None => Slot::Failed,
+            };
+            self.slots.insert(path, slot);
+        }
+    }
+
+    pub fn get(&mut self, ctx: &egui::Context, path: &Path) -> Option<&TextureHandle> {
+        if !self.slots.contains_key(path) {
+            self.slots.insert(path.to_path_buf(), Slot::Loading);
+            let (tx, path_buf, ctx) = (self.tx.clone(), path.to_path_buf(), ctx.clone());
+            std::thread::spawn(move || {
+                let img = ffmpeg::waveform(&path_buf, 2400, 120, "0x4AD68C")
+                    .ok()
+                    .and_then(|png| image::load_from_memory(&png).ok())
+                    .map(|img| {
+                        let rgba = img.to_rgba8();
+                        ColorImage::from_rgba_unmultiplied(
+                            [rgba.width() as usize, rgba.height() as usize],
+                            rgba.as_raw(),
+                        )
                     });
-                }
-                mesh.indices.extend([0, 1, 2, 0, 2, 3]);
-                ui.painter().add(egui::Shape::mesh(mesh));
-                ui.painter().rect_stroke(
-                    shown,
-                    0.0,
-                    Stroke::new(1.0, Color32::from_black_alpha(50)),
-                    StrokeKind::Outside,
-                );
-                shown
-            }
-            None => {
-                let shown = Rect::from_center_size(
-                    rect.center(),
-                    Vec2::new(rect.width().min(rect.height() * 16.0 / 9.0), rect.height()),
-                );
-                ui.painter().rect_filled(
-                    shown,
-                    4.0,
-                    if p.dark {
-                        Color32::from_gray(45)
-                    } else {
-                        Color32::from_gray(225)
-                    },
-                );
-                let label = if failed { I_VIDEO } else { "…" };
-                ui.painter().text(
-                    shown.center(),
-                    Align2::CENTER_CENTER,
-                    label,
-                    FontId::proportional(18.0),
-                    p.text2,
-                );
-                shown
-            }
+                let _ = tx.send((path_buf, img));
+                ctx.request_repaint();
+            });
+        }
+        match self.slots.get(path) {
+            Some(Slot::Ready(t)) => Some(t),
+            _ => None,
         }
     }
 }
@@ -397,117 +438,12 @@ impl Source {
         }
     }
 
-    pub fn loading(&self) -> bool {
-        self.loading.is_some()
-    }
-
-    /// Media with a video stream, ready to use.
-    pub fn video(&self) -> Option<&MediaInfo> {
-        self.info.as_ref().filter(|i| i.has_video())
-    }
-
     /// A time for the card's thumbnail: a tenth of the way in (skips black intros).
     pub fn poster_time(&self) -> f64 {
         self.info
             .as_ref()
             .map(|i| (i.duration * 0.1).min(30.0))
             .unwrap_or(0.0)
-    }
-
-    /// File card (or a drop zone when empty). Returns true when the file changed.
-    pub fn ui(&mut self, ui: &mut egui::Ui, frames: &mut Frames, what: &str, ext: &[&str]) -> bool {
-        self.poll();
-        let ctx = ui.ctx().clone();
-        if self.path.is_none() {
-            let clicked = drop_zone(
-                ui,
-                170.0,
-                &format!("Drop a {what} here or click to browse"),
-                "MP4, MOV, MKV, WebM, AVI and more",
-            );
-            ui.add_space(4.0);
-            if clicked && let Some(p) = pick_file(what, ext) {
-                frames.invalidate(&p);
-                self.set(p, &ctx);
-                return true;
-            }
-            return false;
-        }
-        let mut action = None;
-        media_row(ui, frames, self, |ui| {
-            if ui.button(labeled(I_OPEN, "Change…")).clicked() {
-                action = pick_file(what, ext);
-            }
-        });
-        if let Some(p) = action {
-            frames.invalidate(&p);
-            self.set(p, &ctx);
-            return true;
-        }
-        false
-    }
-}
-
-/// A card for one media file: thumbnail, name, details, and controls on the right.
-pub fn media_row(
-    ui: &mut egui::Ui,
-    frames: &mut Frames,
-    src: &Source,
-    controls: impl FnOnce(&mut egui::Ui),
-) {
-    let Some(path) = src.path.clone() else { return };
-    let p = Palette::current(ui);
-    card(ui, |ui| {
-        ui.horizontal(|ui| {
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(128.0, 72.0), Sense::hover());
-            match &src.info {
-                Some(i) if i.has_video() => {
-                    frames.paint(ui, &path, src.poster_time(), 256, rect);
-                }
-                _ => {
-                    ui.painter()
-                        .rect_filled(rect, 4.0, p.accent.gamma_multiply(0.15));
-                    let icon = if src.error.is_some() {
-                        I_ERROR
-                    } else {
-                        I_AUDIO
-                    };
-                    ui.painter().text(
-                        rect.center(),
-                        Align2::CENTER_CENTER,
-                        icon,
-                        FontId::proportional(24.0),
-                        p.accent,
-                    );
-                }
-            }
-            ui.add_space(8.0);
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 3.0;
-                ui.add_space(6.0);
-                ui.label(strong(file_name(&path)));
-                if let Some(e) = &src.error {
-                    ui.label(RichTextExt::colored(e, p.error));
-                } else if let Some(i) = &src.info {
-                    caption(ui, &format!("{} · {}", i.summary(), human_size(i.size)));
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        caption(ui, "Reading…");
-                    });
-                }
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), controls);
-        });
-    });
-}
-
-/// Small helper so error text can be coloured without importing RichText everywhere.
-pub struct RichTextExt;
-
-impl RichTextExt {
-    pub fn colored(text: &str, color: Color32) -> egui::RichText {
-        egui::RichText::new(text).color(color)
     }
 }
 

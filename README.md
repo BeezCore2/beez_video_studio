@@ -8,28 +8,48 @@ The app uses [FFmpeg](https://ffmpeg.org) as its video engine. On first start it
 
 ## Features
 
-The app opens on a **Home** screen with tool cards. Pick a tool and it opens full-window, with a back button (or press **Esc**) to return. The design follows Windows 11: Segoe UI fonts, Fluent icons, settings-style option cards, an InfoBar for results, and light or dark mode.
+The app is laid out like a video editing studio, in one window:
+
+```
+┌ Top bar: logo · Import media ························· theme ┐
+├ Media bin ┬─────────── Viewer ───────────┬ Inspector ┬ Tool rail ┤
+│ clips with│ frame at the playhead, or    │ settings  │ one icon  │
+│ thumbnails│ playback · ⏮ ◀ ▶ ▶ ⏭         │ + action  │ per tool  │
+├───────────┴──────────────────────────────┴───────────┴───────────┤
+│ Timeline: ruler · playhead · V1 filmstrip · A1 waveform · In/Out │
+├ Status bar: job progress / result ············ FFmpeg · updates  ┤
+```
+
+- **Media bin:** import any number of clips (button, or drop files on the window). Click a clip to select it; right-click to reorder, show in folder or remove.
+- **Viewer:** shows the frame at the playhead. **Play** previews the clip in real time (video only, without sound). Rotation, flips and crop from Resize & Rotate are previewed live.
+- **Timeline:** drag on the ruler or tracks to move the playhead. Mark a range with **Set In / Set Out** (or **I** / **O**), drag the **[ ]** handles, or type exact times. Trim, GIF and Save Frames work on this range.
+- **Inspector:** the settings of the tool chosen in the rail on the right, with its action button. Compress and Convert can apply to the selected clip or to all clips in the bin.
+- **Status bar:** progress, time left and **Cancel** while a job runs; afterwards **Open**, **Show in folder** and **Add to media** (import the result).
+
+Keyboard: **Space** play/pause · **I** / **O** set In / Out · **← / →** previous / next frame · **Home** / **End** jump to In / Out.
+
+The look follows Windows 11 (Segoe UI, Fluent icons) with a green accent; it starts in dark mode and the sun/moon button switches to light mode.
 
 | Group | Tool | What it does |
 |---|---|---|
-| Compress & convert | **Compress Video** | Quality presets (High, Balanced, Small, Tiny) or an exact **target size** in MB; H.264, H.265, AV1 or VP9; CPU or GPU encoding; resolution and frame-rate limits; one file or a whole batch |
-| | **Convert Format** | MP4, MKV, WebM, MOV, AVI, or audio only (MP3, M4A, Opus, FLAC, WAV). Copies streams instead of re-encoding whenever the new format allows it; batch capable |
-| | **Video to GIF** | Sharp, small animated GIF (optimised palette) or animated WebP from any part of a video |
-| Edit | **Trim & Cut** | Filmstrip timeline with draggable handles. Keep a part (lossless fast cut, or frame-accurate) or cut a section out |
-| | **Join Videos** | Lossless join when the clips match; otherwise they are scaled, letterboxed and re-encoded to match the first clip |
+| Compress & convert | **Compress** | Quality presets (High, Balanced, Small, Tiny) or an exact **target size** in MB; H.264, H.265, AV1 or VP9; CPU or GPU encoding; resolution and frame-rate limits; one file or a whole batch |
+| | **Convert** | MP4, MKV, WebM, MOV, AVI, or audio only (MP3, M4A, Opus, FLAC, WAV). Copies streams instead of re-encoding whenever the new format allows it; batch capable |
+| | **GIF / WebP** | Sharp, small animated GIF (optimised palette) or animated WebP from the timeline's In–Out range |
+| Edit | **Trim & Cut** | Export the timeline's In–Out range (lossless fast cut, or frame-accurate), or cut it out |
+| | **Join Clips** | Lossless join when the clips match; otherwise they are scaled, letterboxed and re-encoded to match the first clip |
 | | **Resize & Rotate** | Resolution, rotate, flip, crop to 9:16 / 1:1 / 4:5 / 16:9…, frame rate, with a live preview. Rotation alone is saved instantly without re-encoding |
-| | **Change Speed** | 0.1× to 16×, keeping voices natural (or not) |
-| Audio & more | **Audio Tools** | Extract audio, remove audio, normalize loudness (EBU R128), change volume, replace the audio or mix in music |
-| | **Save Frames** | One still, a frame every N seconds, N evenly spaced frames, or a contact sheet |
+| | **Speed** | 0.1× to 16×, keeping voices natural (or not) |
+| Audio & more | **Audio** | Extract audio, remove audio, normalize loudness (EBU R128), change volume, replace the audio or mix in music |
+| | **Save Frames** | The frame at the playhead, a frame every N seconds, N evenly spaced frames, or a contact sheet |
 | | **Media Info** | Codecs, resolution, rotation, frame rate, bitrates, audio and subtitle tracks |
 
 Other conveniences:
 
-- Drag files onto the window. On Home, videos open in Compress Video and audio files in Audio Tools.
+- Drag files onto the window to import them into the media bin.
 - Open files from the command line: `beez_video_studio.exe a.mp4 b.mov`
 - Work runs in the background with a progress bar, speed and time left. **Cancel** stops FFmpeg at once.
 - Output is written to a temporary `*.beez-part.*` file and renamed only when finished, so a cancelled or failed job never leaves a broken file.
-- When a task finishes, the InfoBar offers **Open** and **Show in folder**, and shows how much smaller the result is.
+- When a task finishes, the status bar shows how much smaller the result is.
 
 ---
 
@@ -80,7 +100,7 @@ GIF allows only 256 colours, so the palette decides the quality. The app generat
 | C/C++ toolchain | Visual Studio Build Tools with the **"Desktop development with C++"** workload | Xcode Command Line Tools | `build-essential` |
 | FFmpeg at runtime | one-click install in the app | `brew install ffmpeg` | `sudo apt install ffmpeg` |
 
-The app looks for `ffmpeg` and `ffprobe` in this order: the folder in `BEEZVIDEO_FFMPEG_DIR`, next to the app (also `ffmpeg\` and `ffmpeg\bin\`), a folder chosen with **Locate…** on Home, the app's own copy in `%LOCALAPPDATA%\Beez Video Studio\ffmpeg\bin`, and the `PATH`.
+The app looks for `ffmpeg` and `ffprobe` in this order: the folder in `BEEZVIDEO_FFMPEG_DIR`, next to the app (also `ffmpeg\` and `ffmpeg\bin\`), a folder chosen with **Locate…** (shown when FFmpeg is missing), the app's own copy in `%LOCALAPPDATA%\Beez Video Studio\ffmpeg\bin`, and the `PATH`.
 
 The one-click install downloads the GPL build from [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds) (with [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) as a fallback) and keeps only `ffmpeg.exe` and `ffprobe.exe`.
 
@@ -170,7 +190,7 @@ Releases are built and published by GitHub Actions ([.github/workflows/release.y
 
 ## 7. Auto-update
 
-The app updates itself from GitHub Releases ([src/updater.rs](src/updater.rs)). On start-up it checks the latest release in the background; when a newer version exists, a dialog offers **Update now**, which replaces the running `.exe` and offers a restart. **Check for updates** is at the bottom of Home.
+The app updates itself from GitHub Releases ([src/updater.rs](src/updater.rs)). On start-up it checks the latest release in the background; when a newer version exists, a dialog offers **Update now**, which replaces the running `.exe` and offers a restart. **Check for updates** is in the status bar.
 
 - The repository is set in `src/updater.rs` (`REPO_OWNER` / `REPO_NAME`) and **must be public**.
 - Set `BEEZVIDEO_NO_UPDATE_CHECK=1` to turn off the start-up check while developing.
@@ -191,11 +211,15 @@ beez_video_studio/
     ├── startup.rs          start-up log, crash dialog, graphics marker
     ├── updater.rs          self-update from GitHub Releases
     ├── ui/
-    │   ├── mod.rs          app shell: Home, tool pages, InfoBar, FFmpeg status
+    │   ├── mod.rs          editor workspace: panels, shortcuts, jobs, status bar
+    │   ├── bin.rs          media bin; each clip's playhead and In/Out range
+    │   ├── viewer.rs       viewer and transport controls
+    │   ├── player.rs       real-time preview playback (FFmpeg → raw frames)
+    │   ├── timeline.rs     ruler, playhead, filmstrip and waveform tracks, In/Out
     │   ├── theme.rs        Windows 11 look: fonts, Fluent icons, colours, cards
-    │   ├── media.rs        source-file cards, background frame cache, previews
+    │   ├── media.rs        background frame and waveform caches, preview painting
     │   ├── update.rs       update dialog
-    │   └── tools/          one file per tool page
+    │   └── tools/          one file per inspector tool
     └── video/
         ├── ffmpeg.rs       find FFmpeg, run it with progress/cancel, encoder detection
         ├── probe.rs        ffprobe → media details; time parsing and formatting
