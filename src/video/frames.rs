@@ -56,14 +56,23 @@ pub fn build(info: &MediaInfo, out: &Path, mode: Mode, format: ImageFormat) -> R
     match mode {
         Mode::Single(t) => {
             if dur > 0.0 && t >= dur {
-                bail!("The time is past the end of the video ({}).", fmt_time(dur, true));
+                bail!(
+                    "The time is past the end of the video ({}).",
+                    fmt_time(dur, true)
+                );
             }
             a.pair("-ss", format!("{:.3}", t.max(0.0)));
             a.push("-i").push(&info.path);
-            a.pair("-map", "0:v:0").pair("-frames:v", "1").pair("-update", "1");
+            a.pair("-map", "0:v:0")
+                .pair("-frames:v", "1")
+                .pair("-update", "1");
             a.extend(format.args());
             let job = Job::new(Output::File(out.to_path_buf()), "Saved");
-            return Ok(job.pass(Pass::new(a, format!("Saving frame at {}", fmt_time(t, true)), 0.0)));
+            return Ok(job.pass(Pass::new(
+                a,
+                format!("Saving frame at {}", fmt_time(t, true)),
+                0.0,
+            )));
         }
         Mode::Sheet { cols, rows, width } => {
             if dur <= 0.0 {
@@ -81,7 +90,9 @@ pub fn build(info: &MediaInfo, out: &Path, mode: Mode, format: ImageFormat) -> R
                     "fps={rate:.6},scale={tw}:-2:flags=lanczos,tile={cols}x{rows}:padding=6:margin=6:color=white"
                 ),
             );
-            a.pair("-map", "0:v:0").pair("-frames:v", "1").pair("-update", "1");
+            a.pair("-map", "0:v:0")
+                .pair("-frames:v", "1")
+                .pair("-update", "1");
             a.extend(format.args());
             let job = Job::new(Output::File(out.to_path_buf()), "Saved");
             return Ok(job.pass(Pass::new(a, "Making contact sheet", dur)));
@@ -126,32 +137,83 @@ mod tests {
         MediaInfo {
             path: "in.mp4".into(),
             duration: 100.0,
-            video: Some(VideoStream { width: 1920, height: 1080, ..Default::default() }),
+            video: Some(VideoStream {
+                width: 1920,
+                height: 1080,
+                ..Default::default()
+            }),
             ..Default::default()
         }
     }
 
     #[test]
     fn single_frame() {
-        let job = build(&info(), Path::new("d/shot.jpg"), Mode::Single(12.5), ImageFormat::Jpg).unwrap();
+        let job = build(
+            &info(),
+            Path::new("d/shot.jpg"),
+            Mode::Single(12.5),
+            ImageFormat::Jpg,
+        )
+        .unwrap();
         let a = &job.passes[0].args;
-        assert!(a.has_pair("-ss", "12.500") && a.has_pair("-frames:v", "1") && a.has_pair("-q:v", "2"));
+        assert!(
+            a.has_pair("-ss", "12.500") && a.has_pair("-frames:v", "1") && a.has_pair("-q:v", "2")
+        );
         assert_eq!(job.output, Output::File("d/shot.jpg".into()));
-        assert!(build(&info(), Path::new("x.png"), Mode::Single(100.0), ImageFormat::Png).is_err());
+        assert!(
+            build(
+                &info(),
+                Path::new("x.png"),
+                Mode::Single(100.0),
+                ImageFormat::Png
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn series_and_sheet() {
-        let job = build(&info(), Path::new("d/my%clip.png"), Mode::Every(5.0), ImageFormat::Png).unwrap();
+        let job = build(
+            &info(),
+            Path::new("d/my%clip.png"),
+            Mode::Every(5.0),
+            ImageFormat::Png,
+        )
+        .unwrap();
         assert!(job.passes[0].args.has_pair("-vf", "fps=1/5"));
-        assert_eq!(job.output, Output::Series { dir: "d".into(), pattern: "my_clip_%04d.png".into() });
+        assert_eq!(
+            job.output,
+            Output::Series {
+                dir: "d".into(),
+                pattern: "my_clip_%04d.png".into()
+            }
+        );
 
-        let job = build(&info(), Path::new("d/c.jpg"), Mode::Count(10), ImageFormat::Jpg).unwrap();
+        let job = build(
+            &info(),
+            Path::new("d/c.jpg"),
+            Mode::Count(10),
+            ImageFormat::Jpg,
+        )
+        .unwrap();
         let a = &job.passes[0].args;
         assert!(a.has_pair("-vf", "fps=0.100000") && a.has_pair("-frames:v", "10"));
 
-        let job = build(&info(), Path::new("s.jpg"), Mode::Sheet { cols: 4, rows: 3, width: 320 }, ImageFormat::Jpg).unwrap();
+        let job = build(
+            &info(),
+            Path::new("s.jpg"),
+            Mode::Sheet {
+                cols: 4,
+                rows: 3,
+                width: 320,
+            },
+            ImageFormat::Jpg,
+        )
+        .unwrap();
         let a = &job.passes[0].args;
-        assert!(a.has_pair("-vf", "fps=0.122400,scale=320:-2:flags=lanczos,tile=4x3:padding=6:margin=6:color=white"));
+        assert!(a.has_pair(
+            "-vf",
+            "fps=0.122400,scale=320:-2:flags=lanczos,tile=4x3:padding=6:margin=6:color=white"
+        ));
     }
 }

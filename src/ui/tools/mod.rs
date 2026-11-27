@@ -67,8 +67,14 @@ pub enum Tool {
 
 impl Tool {
     pub const GROUPS: [(&'static str, &'static [Tool]); 3] = [
-        ("Compress & convert", &[Tool::Compress, Tool::Convert, Tool::Gif]),
-        ("Edit", &[Tool::Trim, Tool::Join, Tool::Transform, Tool::Speed]),
+        (
+            "Compress & convert",
+            &[Tool::Compress, Tool::Convert, Tool::Gif],
+        ),
+        (
+            "Edit",
+            &[Tool::Trim, Tool::Join, Tool::Transform, Tool::Speed],
+        ),
         ("Audio & more", &[Tool::Audio, Tool::Frames, Tool::Info]),
     ];
 
@@ -105,18 +111,21 @@ impl Tool {
     pub fn description(self) -> &'static str {
         match self {
             Tool::Compress => "Make videos smaller: pick a quality level or an exact target size.",
-            Tool::Convert => "Change to MP4, MKV, WebM, MOV, AVI or audio. Copies streams when it can.",
+            Tool::Convert => {
+                "Change to MP4, MKV, WebM, MOV, AVI or audio. Copies streams when it can."
+            }
             Tool::Gif => "Turn a clip into a sharp, small animated GIF or WebP.",
             Tool::Trim => "Keep a part of a video, or cut a section out of it.",
             Tool::Join => "Put several clips together into one video.",
-            Tool::Transform => "Change the resolution, rotate, flip, crop to 9:16 or 1:1, change fps.",
+            Tool::Transform => {
+                "Change the resolution, rotate, flip, crop to 9:16 or 1:1, change fps."
+            }
             Tool::Speed => "Speed up or slow down, with natural-sounding audio.",
             Tool::Audio => "Extract, remove, normalize loudness, change volume or add music.",
             Tool::Frames => "Save a still image, a series of frames or a contact sheet.",
             Tool::Info => "See codecs, resolution, frame rate, bitrates and tracks.",
         }
     }
-
 }
 
 // ---------------------------------------------------------------------------------------
@@ -193,14 +202,23 @@ pub fn batch_task(
         }
         let mut msg = format!("{verb} {done} of {n} files");
         if !failed.is_empty() {
-            msg.push_str(&format!(" ({} failed: {})", failed.len(), failed.join(" · ")));
+            msg.push_str(&format!(
+                " ({} failed: {})",
+                failed.len(),
+                failed.join(" · ")
+            ));
         }
         Ok(format!("{msg} → {}", dir.display()))
     })
 }
 
 /// Plan output names for a batch (unique within the batch).
-pub fn batch_outputs(infos: Vec<MediaInfo>, dir: &Path, suffix: &str, ext: impl Fn(&MediaInfo) -> String) -> Vec<(MediaInfo, PathBuf)> {
+pub fn batch_outputs(
+    infos: Vec<MediaInfo>,
+    dir: &Path,
+    suffix: &str,
+    ext: impl Fn(&MediaInfo) -> String,
+) -> Vec<(MediaInfo, PathBuf)> {
     let mut taken: Vec<PathBuf> = Vec::new();
     infos
         .into_iter()
@@ -231,7 +249,12 @@ pub fn file_list(
         }
     };
     if files.is_empty() {
-        if drop_zone(ui, 170.0, &format!("Drop {what} here or click to browse"), empty_hint) {
+        if drop_zone(
+            ui,
+            170.0,
+            &format!("Drop {what} here or click to browse"),
+            empty_hint,
+        ) {
             add(files, pick_files(what, ext));
             changed = true;
         }
@@ -296,7 +319,12 @@ pub fn combo<T: PartialEq + Copy>(ui: &mut egui::Ui, id: &str, value: &mut T, it
 }
 
 /// A row of toggle buttons (one selected).
-pub fn segmented<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, items: &[(T, &str)], min_w: f32) -> bool {
+pub fn segmented<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    items: &[(T, &str)],
+    min_w: f32,
+) -> bool {
     let mut changed = false;
     ui.horizontal_wrapped(|ui| {
         for (v, l) in items {
@@ -311,9 +339,14 @@ pub fn segmented<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, items: &
 }
 
 /// Big two-line choice buttons (title + description), like the compression levels.
-pub fn big_choices<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, items: &[(T, &str, &str)]) -> bool {
+pub fn big_choices<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    items: &[(T, &str, &str)],
+) -> bool {
     let mut changed = false;
-    let w = ((ui.available_width() - 8.0 * (items.len() as f32 - 1.0)) / items.len() as f32).clamp(120.0, 220.0);
+    let w = ((ui.available_width() - 8.0 * (items.len() as f32 - 1.0)) / items.len() as f32)
+        .clamp(120.0, 220.0);
     ui.horizontal_wrapped(|ui| {
         for (v, name, desc) in items {
             let text = format!("{name}\n{desc}");
@@ -337,7 +370,9 @@ pub fn footer(ui: &mut egui::Ui, enabled: bool, text: &str) -> bool {
 pub fn time_field(ui: &mut egui::Ui, text: &mut String, value: &mut f64, max: f64) -> bool {
     let p = Palette::current(ui);
     let parsed = parse_time(text).filter(|t| max <= 0.0 || *t <= max + 1e-6);
-    let mut edit = egui::TextEdit::singleline(text).desired_width(110.0).hint_text("m:ss.mmm");
+    let mut edit = egui::TextEdit::singleline(text)
+        .desired_width(110.0)
+        .hint_text("m:ss.mmm");
     if parsed.is_none() {
         edit = edit.text_color(p.error);
     }
@@ -357,7 +392,13 @@ pub fn time_field(ui: &mut egui::Ui, text: &mut String, value: &mut f64, max: f6
 }
 
 /// Codec dropdown: codecs this FFmpeg build cannot encode are disabled.
-pub fn codec_combo(ui: &mut egui::Ui, id: &str, value: &mut VideoCodec, choices: &[VideoCodec], caps: &Caps) {
+pub fn codec_combo(
+    ui: &mut egui::Ui,
+    id: &str,
+    value: &mut VideoCodec,
+    choices: &[VideoCodec],
+    caps: &Caps,
+) {
     egui::ComboBox::from_id_salt(id)
         .selected_text(value.name())
         .width(260.0)
@@ -373,7 +414,13 @@ pub fn codec_combo(ui: &mut egui::Ui, id: &str, value: &mut VideoCodec, choices:
 }
 
 /// Encoder (CPU / GPU) dropdown. GPUs appear only when a test encode worked on this PC.
-pub fn backend_combo(ui: &mut egui::Ui, id: &str, value: &mut Backend, codec: VideoCodec, caps: &Caps) {
+pub fn backend_combo(
+    ui: &mut egui::Ui,
+    id: &str,
+    value: &mut Backend,
+    codec: VideoCodec,
+    caps: &Caps,
+) {
     let usable: Vec<Backend> = Backend::ALL
         .into_iter()
         .filter(|&b| b == Backend::Cpu || codec.resolve(b, caps) == b)
@@ -405,7 +452,12 @@ pub fn needs_video(ui: &mut egui::Ui, info: Option<&MediaInfo>) -> bool {
         && !i.has_video()
     {
         let p = Palette::current(ui);
-        ui.label(RichText::new(format!("{I_INFO}  This file has no video. Use Audio Tools for audio files.")).color(p.error));
+        ui.label(
+            RichText::new(format!(
+                "{I_INFO}  This file has no video. Use Audio Tools for audio files."
+            ))
+            .color(p.error),
+        );
         return true;
     }
     false
@@ -420,11 +472,20 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("beez-out-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let input = dir.join("clip.mp4");
-        assert_eq!(output_in(&dir, &input, "small", "mp4", &[]), dir.join("clip_small.mp4"));
+        assert_eq!(
+            output_in(&dir, &input, "small", "mp4", &[]),
+            dir.join("clip_small.mp4")
+        );
         std::fs::write(dir.join("clip_small.mp4"), "x").unwrap();
-        assert_eq!(output_in(&dir, &input, "small", "mp4", &[]), dir.join("clip_small (2).mp4"));
+        assert_eq!(
+            output_in(&dir, &input, "small", "mp4", &[]),
+            dir.join("clip_small (2).mp4")
+        );
         let taken = [dir.join("clip_small (2).mp4")];
-        assert_eq!(output_in(&dir, &input, "small", "mp4", &taken), dir.join("clip_small (3).mp4"));
+        assert_eq!(
+            output_in(&dir, &input, "small", "mp4", &taken),
+            dir.join("clip_small (3).mp4")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

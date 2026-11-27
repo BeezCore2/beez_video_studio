@@ -25,7 +25,9 @@ pub fn sources() -> &'static [&'static str] {
             "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
         ]
     } else if cfg!(all(windows, target_arch = "aarch64")) {
-        &["https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-winarm64-gpl.zip"]
+        &[
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-winarm64-gpl.zip",
+        ]
     } else {
         &[]
     }
@@ -77,7 +79,10 @@ pub fn install(progress: &Progress) -> Result<String> {
     let tools = ffmpeg::refresh().context("FFmpeg was unpacked but could not be found")?;
     let version = ffmpeg::version(&tools).unwrap_or_default();
     progress.set(1.0, "Done");
-    Ok(format!("FFmpeg {version} is installed and ready to use → {}", dir.display()))
+    Ok(format!(
+        "FFmpeg {version} is installed and ready to use → {}",
+        dir.display()
+    ))
 }
 
 fn download(url: &str, dest: &Path, progress: &Progress) -> Result<()> {
@@ -119,7 +124,11 @@ fn download(url: &str, dest: &Path, progress: &Progress) -> Result<()> {
             match total {
                 Some(t) if t > 0 => progress.set(
                     0.9 * done as f32 / t as f32,
-                    format!("Downloading FFmpeg · {} of {}", human_size(done), human_size(t)),
+                    format!(
+                        "Downloading FFmpeg · {} of {}",
+                        human_size(done),
+                        human_size(t)
+                    ),
                 ),
                 _ => progress.set(0.0, format!("Downloading FFmpeg · {}", human_size(done))),
             }
@@ -129,7 +138,11 @@ fn download(url: &str, dest: &Path, progress: &Progress) -> Result<()> {
     if let Some(t) = total
         && done != t
     {
-        bail!("The download was incomplete ({} of {})", human_size(done), human_size(t));
+        bail!(
+            "The download was incomplete ({} of {})",
+            human_size(done),
+            human_size(t)
+        );
     }
     Ok(())
 }
@@ -145,8 +158,7 @@ fn extract(zip_path: &Path, dir: &Path) -> Result<()> {
         let Some(name) = entry.enclosed_name() else {
             continue;
         };
-        let Some(file_name) = name.file_name().map(|f| f.to_string_lossy().to_lowercase())
-        else {
+        let Some(file_name) = name.file_name().map(|f| f.to_string_lossy().to_lowercase()) else {
             continue;
         };
         let in_bin = name
@@ -165,7 +177,8 @@ fn extract(zip_path: &Path, dir: &Path) -> Result<()> {
         }
         // Replacing fails if an old copy is running; the old one then stays in use.
         let _ = fs::remove_file(&target);
-        fs::rename(&temp, &target).with_context(|| format!("Could not write {}", target.display()))?;
+        fs::rename(&temp, &target)
+            .with_context(|| format!("Could not write {}", target.display()))?;
         found.push(file_name);
     }
     if found.len() < wanted.len() {

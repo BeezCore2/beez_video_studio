@@ -118,11 +118,19 @@ fn require_audio(info: &MediaInfo) -> Result<()> {
 
 /// Extract audio track `track` (0-based) as `format`; `kbps` for lossy formats (0 = VBR
 /// high quality for MP3).
-pub fn build_extract(info: &MediaInfo, out: &Path, format: Format, kbps: u32, track: usize) -> Result<Job> {
+pub fn build_extract(
+    info: &MediaInfo,
+    out: &Path,
+    format: Format,
+    kbps: u32,
+    track: usize,
+) -> Result<Job> {
     require_audio(info)?;
     let track = track.min(info.audio.len() - 1);
     let mut a = input(&info.path);
-    a.push("-vn").push("-sn").pair("-map", format!("0:a:{track}"));
+    a.push("-vn")
+        .push("-sn")
+        .pair("-map", format!("0:a:{track}"));
     match format.codec() {
         None => {
             a.pair("-c:a", "copy");
@@ -135,7 +143,11 @@ pub fn build_extract(info: &MediaInfo, out: &Path, format: Format, kbps: u32, tr
         }
     }
     let job = Job::new(Output::File(out.to_path_buf()), "Saved");
-    let stage = if format == Format::Original { "Copying audio (no quality loss)" } else { "Extracting audio" };
+    let stage = if format == Format::Original {
+        "Copying audio (no quality loss)"
+    } else {
+        "Extracting audio"
+    };
     Ok(job.pass(Pass::new(a, stage, info.duration)))
 }
 
@@ -150,7 +162,11 @@ pub fn build_remove(info: &MediaInfo, out: &Path) -> Result<Job> {
     let codec = info.video.as_ref().map(|v| v.codec.clone());
     a.extend(c.mux_args(codec.as_deref()));
     let job = Job::new(Output::File(out.to_path_buf()), "Saved");
-    Ok(job.pass(Pass::new(a, "Removing audio (no quality loss)", info.duration)))
+    Ok(job.pass(Pass::new(
+        a,
+        "Removing audio (no quality loss)",
+        info.duration,
+    )))
 }
 
 /// Video copied (if any), audio re-encoded through `filter` in the format `out` implies.
@@ -216,17 +232,27 @@ pub struct Loudness {
 
 /// Read the JSON block loudnorm prints at the end of its log.
 pub fn parse_loudness(log: &str) -> Result<Loudness> {
-    let start = log.rfind('{').context("The loudness analysis gave no result")?;
-    let end = log[start..].find('}').context("The loudness analysis gave no result")? + start;
+    let start = log
+        .rfind('{')
+        .context("The loudness analysis gave no result")?;
+    let end = log[start..]
+        .find('}')
+        .context("The loudness analysis gave no result")?
+        + start;
     let v: serde_json::Value =
         serde_json::from_str(&log[start..=end]).context("Could not read the loudness analysis")?;
     let num = |k: &str| -> Result<f64> {
-        let s = v.get(k).and_then(|x| x.as_str()).with_context(|| format!("Missing {k}"))?;
+        let s = v
+            .get(k)
+            .and_then(|x| x.as_str())
+            .with_context(|| format!("Missing {k}"))?;
         // Silence measures as "-inf".
         if s.contains("inf") {
             bail!("The audio is silent, so it cannot be normalized.");
         }
-        s.trim().parse().with_context(|| format!("Bad value for {k}: {s}"))
+        s.trim()
+            .parse()
+            .with_context(|| format!("Bad value for {k}: {s}"))
     };
     Ok(Loudness {
         input_i: num("input_i")?,
@@ -257,7 +283,13 @@ pub fn loudnorm_pass2(target: f64, tp: f64, m: &Loudness, sample_rate: u32) -> S
 }
 
 /// Two-pass loudness normalization (runs the analysis, then the job).
-pub fn normalize(info: &MediaInfo, out: &Path, target: f64, tp: f64, progress: &Progress) -> Result<String> {
+pub fn normalize(
+    info: &MediaInfo,
+    out: &Path,
+    target: f64,
+    tp: f64,
+    progress: &Progress,
+) -> Result<String> {
     require_audio(info)?;
     let mut a = input(&info.path);
     a.pair("-map", "0:a:0")
@@ -279,7 +311,10 @@ pub fn normalize(info: &MediaInfo, out: &Path, target: f64, tp: f64, progress: &
     let mut job = Job::new(Output::File(out.to_path_buf()), "Normalized");
     job = job.pass(Pass::new(
         args,
-        format!("Adjusting {:.1} → {target:.0} LUFS (pass 2 of 2)", m.input_i),
+        format!(
+            "Adjusting {:.1} → {target:.0} LUFS (pass 2 of 2)",
+            m.input_i
+        ),
         info.duration,
     ));
     job::execute_in(job, progress, 0.35, 1.0)
@@ -294,7 +329,12 @@ pub enum MusicMode {
     Mix { music_volume: f32 },
 }
 
-pub fn build_music(info: &MediaInfo, music: &MediaInfo, out: &Path, mode: MusicMode) -> Result<Job> {
+pub fn build_music(
+    info: &MediaInfo,
+    music: &MediaInfo,
+    out: &Path,
+    mode: MusicMode,
+) -> Result<Job> {
     if !info.has_video() {
         bail!("Choose a video to add the audio to.");
     }
@@ -336,7 +376,11 @@ pub fn build_music(info: &MediaInfo, music: &MediaInfo, out: &Path, mode: MusicM
     let vcodec = info.video.as_ref().map(|v| v.codec.clone());
     a.extend(c.mux_args(vcodec.as_deref()));
     let job = Job::new(Output::File(out.to_path_buf()), "Saved");
-    let stage = if mix { "Mixing audio" } else { "Replacing audio" };
+    let stage = if mix {
+        "Mixing audio"
+    } else {
+        "Replacing audio"
+    };
     Ok(job.pass(Pass::new(a, stage, info.duration)))
 }
 
@@ -349,10 +393,25 @@ mod tests {
         MediaInfo {
             path: "in.mp4".into(),
             duration: 60.0,
-            video: video.then(|| VideoStream { codec: "h264".into(), width: 640, height: 360, ..Default::default() }),
+            video: video.then(|| VideoStream {
+                codec: "h264".into(),
+                width: 640,
+                height: 360,
+                ..Default::default()
+            }),
             audio: vec![
-                AudioStream { codec: "aac".into(), sample_rate: 44100, channels: 2, ..Default::default() },
-                AudioStream { codec: "ac3".into(), sample_rate: 48000, channels: 6, ..Default::default() },
+                AudioStream {
+                    codec: "aac".into(),
+                    sample_rate: 44100,
+                    channels: 2,
+                    ..Default::default()
+                },
+                AudioStream {
+                    codec: "ac3".into(),
+                    sample_rate: 48000,
+                    channels: 6,
+                    ..Default::default()
+                },
             ],
             ..Default::default()
         }
@@ -369,7 +428,11 @@ mod tests {
         assert!(a.has_pair("-map", "0:a:1"), "track index is clamped");
         assert!(a.has_pair("-c:a", "libmp3lame") && a.has_pair("-q:a", "2"));
         let job = build_extract(&i, Path::new("o.opus"), Format::Opus, 96, 1).unwrap();
-        assert!(job.passes[0].args.has_pair("-af", "aformat=channel_layouts=7.1|5.1|stereo|mono"));
+        assert!(
+            job.passes[0]
+                .args
+                .has_pair("-af", "aformat=channel_layouts=7.1|5.1|stereo|mono")
+        );
         assert_eq!(original_ext("pcm_s24le"), "wav");
         assert_eq!(original_ext("dts"), "mka");
         assert_eq!(Format::Original.ext("aac"), "m4a");
@@ -386,7 +449,10 @@ mod tests {
         assert!(a.has_pair("-af", "volume=6.0dB,alimiter=limit=0.97:level=false"));
         assert!(a.has_pair("-c:v", "copy") && a.has_pair("-c:a", "aac"));
         // Audio-only: codec from the extension.
-        let a = &build_volume(&info(false), Path::new("o.flac"), -3.0).unwrap().passes[0].args;
+        let a = &build_volume(&info(false), Path::new("o.flac"), -3.0)
+            .unwrap()
+            .passes[0]
+            .args;
         assert!(a.has_pair("-c:a", "flac") && a.has("-vn"));
         assert!(build_volume(&i, Path::new("o.mp4"), 0.0).is_err());
     }
@@ -416,17 +482,36 @@ mod tests {
             "loudnorm=I=-16:TP=-1.5:LRA=11:measured_I=-27.61:measured_TP=-4.47:measured_LRA=18.06:measured_thresh=-39.2:offset=0.58:linear=true:print_format=none,aresample=44100"
         );
         let silent = log.replace("\"-27.61\"", "\"-inf\"");
-        assert!(parse_loudness(&silent).unwrap_err().to_string().contains("silent"));
+        assert!(
+            parse_loudness(&silent)
+                .unwrap_err()
+                .to_string()
+                .contains("silent")
+        );
         assert!(parse_loudness("no json here").is_err());
     }
 
     #[test]
     fn music() {
         let v = info(true);
-        let m = MediaInfo { path: "song.mp3".into(), ..info(false) };
-        let a = &build_music(&v, &m, Path::new("o.mp4"), MusicMode::Replace).unwrap().passes[0].args;
+        let m = MediaInfo {
+            path: "song.mp3".into(),
+            ..info(false)
+        };
+        let a = &build_music(&v, &m, Path::new("o.mp4"), MusicMode::Replace)
+            .unwrap()
+            .passes[0]
+            .args;
         assert!(a.has_pair("-map", "1:a:0") && a.has("-shortest"));
-        let a = &build_music(&v, &m, Path::new("o.mp4"), MusicMode::Mix { music_volume: 0.3 }).unwrap().passes[0].args;
+        let a = &build_music(
+            &v,
+            &m,
+            Path::new("o.mp4"),
+            MusicMode::Mix { music_volume: 0.3 },
+        )
+        .unwrap()
+        .passes[0]
+            .args;
         assert!(a.has_pair("-stream_loop", "-1"));
         let s = a.strings();
         let fc = &s[s.iter().position(|x| x == "-filter_complex").unwrap() + 1];

@@ -37,7 +37,10 @@ impl Args {
 
     /// The arguments as plain strings (for tests and logs).
     pub fn strings(&self) -> Vec<String> {
-        self.0.iter().map(|a| a.to_string_lossy().into_owned()).collect()
+        self.0
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
     }
 
     /// Whether `k` is immediately followed by `v`.
@@ -199,14 +202,17 @@ impl VideoCodec {
 
     /// Whether two-pass encoding is used for a bitrate target (best size accuracy).
     pub fn two_pass(self, backend: Backend) -> bool {
-        backend == Backend::Cpu && matches!(self, VideoCodec::H264 | VideoCodec::H265 | VideoCodec::Vp9)
+        backend == Backend::Cpu
+            && matches!(self, VideoCodec::H264 | VideoCodec::H265 | VideoCodec::Vp9)
     }
 
     /// Codec arguments (`-c:v …` and rate control), without pass settings.
     /// `ten_bit` keeps 10-bit colour for sources that have it (H.265/AV1/VP9 only).
     pub fn args(self, backend: Backend, rate: Rate, speed: Speed, ten_bit: bool) -> Args {
         let mut a = Args::new();
-        let enc = self.encoder(backend).unwrap_or_else(|| self.software_encoder().into());
+        let enc = self
+            .encoder(backend)
+            .unwrap_or_else(|| self.software_encoder().into());
         a.pair("-c:v", &enc);
         let q = |crf: u8| -> u8 {
             match (backend, self) {
@@ -281,15 +287,25 @@ impl VideoCodec {
                 a.pair("-preset", preset).pair("-tune", "hq");
                 match rate {
                     Rate::Quality(crf) => {
-                        a.pair("-rc", "vbr").pair("-cq", q(crf).to_string()).pair("-b:v", "0");
+                        a.pair("-rc", "vbr")
+                            .pair("-cq", q(crf).to_string())
+                            .pair("-b:v", "0");
                     }
                     Rate::Bitrate(bps) => {
                         a.pair("-rc", "vbr").pair("-b:v", kbps(bps));
-                        a.pair("-maxrate", kbps(bps * 3 / 2)).pair("-bufsize", kbps(bps * 2));
+                        a.pair("-maxrate", kbps(bps * 3 / 2))
+                            .pair("-bufsize", kbps(bps * 2));
                         a.pair("-multipass", "fullres");
                     }
                 }
-                a.pair("-pix_fmt", if ten_bit && self != VideoCodec::H264 { "p010le" } else { "nv12" });
+                a.pair(
+                    "-pix_fmt",
+                    if ten_bit && self != VideoCodec::H264 {
+                        "p010le"
+                    } else {
+                        "nv12"
+                    },
+                );
             }
             Backend::Intel => {
                 let preset = match speed {
@@ -303,10 +319,18 @@ impl VideoCodec {
                         a.pair("-global_quality", q(crf).to_string());
                     }
                     Rate::Bitrate(bps) => {
-                        a.pair("-b:v", kbps(bps)).pair("-maxrate", kbps(bps * 3 / 2));
+                        a.pair("-b:v", kbps(bps))
+                            .pair("-maxrate", kbps(bps * 3 / 2));
                     }
                 }
-                a.pair("-pix_fmt", if ten_bit && self != VideoCodec::H264 { "p010le" } else { "nv12" });
+                a.pair(
+                    "-pix_fmt",
+                    if ten_bit && self != VideoCodec::H264 {
+                        "p010le"
+                    } else {
+                        "nv12"
+                    },
+                );
             }
             Backend::Amd => {
                 let quality = match speed {
@@ -331,7 +355,14 @@ impl VideoCodec {
                             .pair("-maxrate", kbps(bps * 3 / 2));
                     }
                 }
-                a.pair("-pix_fmt", if ten_bit && self != VideoCodec::H264 { "p010le" } else { "nv12" });
+                a.pair(
+                    "-pix_fmt",
+                    if ten_bit && self != VideoCodec::H264 {
+                        "p010le"
+                    } else {
+                        "nv12"
+                    },
+                );
             }
         }
         a
@@ -342,7 +373,10 @@ impl VideoCodec {
         let mut a = Args::new();
         match self {
             VideoCodec::H265 => {
-                a.pair("-x265-params", format!("log-level=error:pass={n}:stats={log}.log"));
+                a.pair(
+                    "-x265-params",
+                    format!("log-level=error:pass={n}:stats={log}.log"),
+                );
             }
             _ => {
                 a.pair("-pass", n.to_string()).pair("-passlogfile", log);
@@ -477,19 +511,29 @@ impl Container {
     pub fn accepts_video(self, codec: &str) -> bool {
         match self {
             Container::Mkv => true,
-            Container::Mp4 => matches!(codec, "h264" | "hevc" | "av1" | "vp9" | "mpeg4" | "mpeg2video"),
+            Container::Mp4 => matches!(
+                codec,
+                "h264" | "hevc" | "av1" | "vp9" | "mpeg4" | "mpeg2video"
+            ),
             Container::Mov => matches!(codec, "h264" | "hevc" | "prores" | "mpeg4" | "mjpeg"),
             Container::WebM => matches!(codec, "vp8" | "vp9" | "av1"),
-            Container::Avi => matches!(codec, "mpeg4" | "h264" | "mjpeg" | "msmpeg4v3" | "mpeg2video"),
+            Container::Avi => matches!(
+                codec,
+                "mpeg4" | "h264" | "mjpeg" | "msmpeg4v3" | "mpeg2video"
+            ),
         }
     }
 
     pub fn accepts_audio(self, codec: &str) -> bool {
         match self {
             Container::Mkv => true,
-            Container::Mp4 => matches!(codec, "aac" | "mp3" | "ac3" | "eac3" | "opus" | "alac" | "flac"),
+            Container::Mp4 => matches!(
+                codec,
+                "aac" | "mp3" | "ac3" | "eac3" | "opus" | "alac" | "flac"
+            ),
             Container::Mov => {
-                matches!(codec, "aac" | "mp3" | "ac3" | "eac3" | "alac") || codec.starts_with("pcm_")
+                matches!(codec, "aac" | "mp3" | "ac3" | "eac3" | "alac")
+                    || codec.starts_with("pcm_")
             }
             Container::WebM => matches!(codec, "opus" | "vorbis"),
             Container::Avi => matches!(codec, "mp3" | "ac3" | "pcm_s16le"),
@@ -528,7 +572,10 @@ impl Container {
         let mut a = Args::new();
         if matches!(self, Container::Mp4 | Container::Mov) {
             a.pair("-movflags", "+faststart");
-            if video == Some("hevc") || video == Some("libx265") || video.is_some_and(|v| v.starts_with("hevc_")) {
+            if video == Some("hevc")
+                || video == Some("libx265")
+                || video.is_some_and(|v| v.starts_with("hevc_"))
+            {
                 a.pair("-tag:v", "hvc1");
             }
         }
@@ -673,15 +720,26 @@ mod tests {
             encoders: vec!["libx264".into(), "h264_nvenc".into()],
             hardware: vec!["h264_nvenc".into()],
         };
-        assert_eq!(VideoCodec::H264.resolve(Backend::Nvidia, &caps), Backend::Nvidia);
-        assert_eq!(VideoCodec::H265.resolve(Backend::Nvidia, &caps), Backend::Cpu);
+        assert_eq!(
+            VideoCodec::H264.resolve(Backend::Nvidia, &caps),
+            Backend::Nvidia
+        );
+        assert_eq!(
+            VideoCodec::H265.resolve(Backend::Nvidia, &caps),
+            Backend::Cpu
+        );
         assert_eq!(VideoCodec::Vp9.resolve(Backend::Intel, &caps), Backend::Cpu);
         assert_eq!(VideoCodec::Vp9.encoder(Backend::Amd), None);
     }
 
     #[test]
     fn two_pass_x265_uses_params() {
-        let mut a = VideoCodec::H265.args(Backend::Cpu, Rate::Bitrate(1_000_000), Speed::Balanced, false);
+        let mut a = VideoCodec::H265.args(
+            Backend::Cpu,
+            Rate::Bitrate(1_000_000),
+            Speed::Balanced,
+            false,
+        );
         a.extend(VideoCodec::H265.pass_args(1, "log"));
         merge_x265_params(&mut a);
         let s = a.strings();
@@ -699,14 +757,31 @@ mod tests {
         assert!(!Container::Mp4.accepts_audio("vorbis"));
         assert!(Container::Mov.accepts_audio("pcm_s24le"));
         assert_eq!(Container::from_ext("M4V"), Some(Container::Mp4));
-        assert!(Container::Mp4.mux_args(Some("libx265")).has_pair("-tag:v", "hvc1"));
+        assert!(
+            Container::Mp4
+                .mux_args(Some("libx265"))
+                .has_pair("-tag:v", "hvc1")
+        );
         assert!(!Container::Mp4.mux_args(Some("libx264")).has("-tag:v"));
         assert!(Container::Mkv.mux_args(None).0.is_empty());
 
         let subs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(Container::Mkv.subtitle_args(&subs(&["mov_text"])).has_pair("-c:s", "srt"));
-        assert!(Container::Mp4.subtitle_args(&subs(&["subrip"])).has_pair("-c:s", "mov_text"));
-        assert!(Container::Mp4.subtitle_args(&subs(&["hdmv_pgs_subtitle"])).0.is_empty());
+        assert!(
+            Container::Mkv
+                .subtitle_args(&subs(&["mov_text"]))
+                .has_pair("-c:s", "srt")
+        );
+        assert!(
+            Container::Mp4
+                .subtitle_args(&subs(&["subrip"]))
+                .has_pair("-c:s", "mov_text")
+        );
+        assert!(
+            Container::Mp4
+                .subtitle_args(&subs(&["hdmv_pgs_subtitle"]))
+                .0
+                .is_empty()
+        );
         assert!(Container::Mp4.subtitle_args(&[]).0.is_empty());
     }
 

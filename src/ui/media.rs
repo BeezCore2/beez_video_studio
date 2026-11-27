@@ -19,7 +19,9 @@ pub const VIDEO_EXT: &[&str] = &[
     "mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "flv", "mpg", "mpeg", "ts", "mts", "m2ts",
     "3gp", "ogv", "vob", "gif",
 ];
-pub const AUDIO_EXT: &[&str] = &["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma", "aiff"];
+pub const AUDIO_EXT: &[&str] = &[
+    "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma", "aiff",
+];
 
 pub fn media_ext() -> Vec<&'static str> {
     [VIDEO_EXT, AUDIO_EXT].concat()
@@ -168,7 +170,13 @@ impl Frames {
 
     /// The frame at `secs`, `width` pixels wide; requested in the background if needed.
     /// Times are rounded to 0.1 s so nearby requests share a frame.
-    pub fn get(&mut self, ctx: &egui::Context, path: &Path, secs: f64, width: u32) -> Option<&TextureHandle> {
+    pub fn get(
+        &mut self,
+        ctx: &egui::Context,
+        path: &Path,
+        secs: f64,
+        width: u32,
+    ) -> Option<&TextureHandle> {
         let ms = ((secs.max(0.0) * 10.0).round() as u64) * 100;
         let key = (path.to_path_buf(), ms, width);
         if !self.slots.contains_key(&key) {
@@ -226,7 +234,12 @@ impl Frames {
                 let shown = Rect::from_center_size(rect.center(), Vec2::new(w * s, h * s));
                 let uv = view.uvs((x0, y0, x1, y1));
                 let mut mesh = egui::Mesh::with_texture(tex.id());
-                let corners = [shown.left_top(), shown.right_top(), shown.right_bottom(), shown.left_bottom()];
+                let corners = [
+                    shown.left_top(),
+                    shown.right_top(),
+                    shown.right_bottom(),
+                    shown.left_bottom(),
+                ];
                 for (pos, uv) in corners.iter().zip(uv) {
                     mesh.vertices.push(egui::epaint::Vertex {
                         pos: *pos,
@@ -252,7 +265,11 @@ impl Frames {
                 ui.painter().rect_filled(
                     shown,
                     4.0,
-                    if p.dark { Color32::from_gray(45) } else { Color32::from_gray(225) },
+                    if p.dark {
+                        Color32::from_gray(45)
+                    } else {
+                        Color32::from_gray(225)
+                    },
                 );
                 let label = if failed { I_VIDEO } else { "…" };
                 ui.painter().text(
@@ -298,7 +315,12 @@ impl View {
     /// bottom-left) of the crop rectangle `c` (in displayed, rotated space).
     fn uvs(&self, c: (f32, f32, f32, f32)) -> [Pos2; 4] {
         // Source corners in the same order.
-        let src = [Pos2::new(0.0, 0.0), Pos2::new(1.0, 0.0), Pos2::new(1.0, 1.0), Pos2::new(0.0, 1.0)];
+        let src = [
+            Pos2::new(0.0, 0.0),
+            Pos2::new(1.0, 0.0),
+            Pos2::new(1.0, 1.0),
+            Pos2::new(0.0, 1.0),
+        ];
         // After rotating k quarter turns clockwise, displayed corner j shows source corner
         // (j + 4 − k) mod 4.
         let k = (self.rotate / 90 % 4) as usize;
@@ -386,7 +408,10 @@ impl Source {
 
     /// A time for the card's thumbnail: a tenth of the way in (skips black intros).
     pub fn poster_time(&self) -> f64 {
-        self.info.as_ref().map(|i| (i.duration * 0.1).min(30.0)).unwrap_or(0.0)
+        self.info
+            .as_ref()
+            .map(|i| (i.duration * 0.1).min(30.0))
+            .unwrap_or(0.0)
     }
 
     /// File card (or a drop zone when empty). Returns true when the file changed.
@@ -424,7 +449,12 @@ impl Source {
 }
 
 /// A card for one media file: thumbnail, name, details, and controls on the right.
-pub fn media_row(ui: &mut egui::Ui, frames: &mut Frames, src: &Source, controls: impl FnOnce(&mut egui::Ui)) {
+pub fn media_row(
+    ui: &mut egui::Ui,
+    frames: &mut Frames,
+    src: &Source,
+    controls: impl FnOnce(&mut egui::Ui),
+) {
     let Some(path) = src.path.clone() else { return };
     let p = Palette::current(ui);
     card(ui, |ui| {
@@ -435,9 +465,20 @@ pub fn media_row(ui: &mut egui::Ui, frames: &mut Frames, src: &Source, controls:
                     frames.paint(ui, &path, src.poster_time(), 256, rect);
                 }
                 _ => {
-                    ui.painter().rect_filled(rect, 4.0, p.accent.gamma_multiply(0.15));
-                    let icon = if src.error.is_some() { I_ERROR } else { I_AUDIO };
-                    ui.painter().text(rect.center(), Align2::CENTER_CENTER, icon, FontId::proportional(24.0), p.accent);
+                    ui.painter()
+                        .rect_filled(rect, 4.0, p.accent.gamma_multiply(0.15));
+                    let icon = if src.error.is_some() {
+                        I_ERROR
+                    } else {
+                        I_AUDIO
+                    };
+                    ui.painter().text(
+                        rect.center(),
+                        Align2::CENTER_CENTER,
+                        icon,
+                        FontId::proportional(24.0),
+                        p.accent,
+                    );
                 }
             }
             ui.add_space(8.0);
@@ -499,12 +540,23 @@ mod tests {
         let id = View::default().uvs(full);
         assert!(near(id[0], 0.0, 0.0) && near(id[2], 1.0, 1.0));
         // 90° clockwise: the top-left of the result shows the source's bottom-left.
-        let r = View { rotate: 90, ..Default::default() }.uvs(full);
+        let r = View {
+            rotate: 90,
+            ..Default::default()
+        }
+        .uvs(full);
         assert!(near(r[0], 0.0, 1.0) && near(r[1], 0.0, 0.0) && near(r[2], 1.0, 0.0));
-        let f = View { flip_h: true, ..Default::default() }.uvs(full);
+        let f = View {
+            flip_h: true,
+            ..Default::default()
+        }
+        .uvs(full);
         assert!(near(f[0], 1.0, 0.0) && near(f[1], 0.0, 0.0));
         // Square crop of a 16:9 frame keeps the middle.
-        let v = View { crop: Some((1, 1)), ..Default::default() };
+        let v = View {
+            crop: Some((1, 1)),
+            ..Default::default()
+        };
         let c = v.crop_frac(1920.0, 1080.0);
         assert!((c.0 - 0.21875).abs() < 1e-5 && (c.2 - 0.78125).abs() < 1e-5);
     }

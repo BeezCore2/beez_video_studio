@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, StrokeKind, Vec2, pos2};
+use eframe::egui::{
+    self, Align2, Color32, CornerRadius, FontId, Rect, Sense, Stroke, StrokeKind, Vec2, pos2,
+};
 
 use super::*;
 use crate::ui::media::{Frames, Source, media_ext};
@@ -45,10 +47,17 @@ impl TrimState {
     }
 
     /// Filmstrip with the selection; returns true when the selection changed.
-    fn timeline(&mut self, ui: &mut egui::Ui, frames: &mut Frames, path: &std::path::Path, dur: f64) -> bool {
+    fn timeline(
+        &mut self,
+        ui: &mut egui::Ui,
+        frames: &mut Frames,
+        path: &std::path::Path,
+        dur: f64,
+    ) -> bool {
         let p = Palette::current(ui);
         let h = 72.0;
-        let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click_and_drag());
+        let (rect, resp) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::click_and_drag());
         let painter = ui.painter_at(rect.expand(8.0));
         painter.rect_filled(rect, 4.0, Color32::from_gray(20));
 
@@ -57,7 +66,10 @@ impl TrimState {
         let n = (rect.width() / tile_w).ceil().max(1.0) as usize;
         let step = rect.width() / n as f32;
         for i in 0..n {
-            let r = Rect::from_min_size(pos2(rect.left() + i as f32 * step, rect.top()), Vec2::new(step, h));
+            let r = Rect::from_min_size(
+                pos2(rect.left() + i as f32 * step, rect.top()),
+                Vec2::new(step, h),
+            );
             let t = dur * (i as f64 + 0.5) / n as f64;
             if let Some(tex) = frames.get(ui.ctx(), path, t, 160) {
                 // Fill the tile (crop the frame's centre).
@@ -79,17 +91,35 @@ impl TrimState {
         let (xs, xe) = (x_of(self.start), x_of(self.end));
         let shade = Color32::from_black_alpha(170);
         if self.remove {
-            painter.rect_filled(Rect::from_x_y_ranges(xs..=xe, rect.y_range()), 0.0, Color32::from_rgba_unmultiplied(200, 30, 30, 150));
+            painter.rect_filled(
+                Rect::from_x_y_ranges(xs..=xe, rect.y_range()),
+                0.0,
+                Color32::from_rgba_unmultiplied(200, 30, 30, 150),
+            );
         } else {
-            painter.rect_filled(Rect::from_x_y_ranges(rect.left()..=xs, rect.y_range()), CornerRadius::ZERO, shade);
-            painter.rect_filled(Rect::from_x_y_ranges(xe..=rect.right(), rect.y_range()), CornerRadius::ZERO, shade);
+            painter.rect_filled(
+                Rect::from_x_y_ranges(rect.left()..=xs, rect.y_range()),
+                CornerRadius::ZERO,
+                shade,
+            );
+            painter.rect_filled(
+                Rect::from_x_y_ranges(xe..=rect.right(), rect.y_range()),
+                CornerRadius::ZERO,
+                shade,
+            );
         }
         let sel = Rect::from_x_y_ranges(xs..=xe, rect.y_range());
         painter.rect_stroke(sel, 2.0, Stroke::new(3.0, p.accent), StrokeKind::Inside);
         for (x, label) in [(xs, "["), (xe, "]")] {
             let handle = Rect::from_center_size(pos2(x, rect.center().y), Vec2::new(12.0, h + 8.0));
             painter.rect_filled(handle, 3.0, p.accent);
-            painter.text(handle.center(), Align2::CENTER_CENTER, label, FontId::monospace(12.0), p.on_accent);
+            painter.text(
+                handle.center(),
+                Align2::CENTER_CENTER,
+                label,
+                FontId::monospace(12.0),
+                p.on_accent,
+            );
         }
 
         // Interaction: drag the nearest handle; click moves the nearest handle there.
@@ -124,7 +154,14 @@ impl TrimState {
         }
         let dur = info.duration.max(0.1);
 
-        section(ui, if self.remove { "Part to remove" } else { "Part to keep" });
+        section(
+            ui,
+            if self.remove {
+                "Part to remove"
+            } else {
+                "Part to keep"
+            },
+        );
         let mut changed = false;
         card(ui, |ui| {
             if info.has_video() {
@@ -158,7 +195,11 @@ impl TrimState {
                     changed = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let kept = if self.remove { dur - (self.end - self.start) } else { self.end - self.start };
+                    let kept = if self.remove {
+                        dur - (self.end - self.start)
+                    } else {
+                        self.end - self.start
+                    };
                     ui.label(strong(format!("Result: {}", fmt_time(kept.max(0.0), true))));
                 });
             });
@@ -169,33 +210,71 @@ impl TrimState {
 
         section(ui, "Options");
         setting(ui, I_CUT, "Action", "", |ui| {
-            segmented(ui, &mut self.remove, &[(false, "Keep selection"), (true, "Cut selection out")], 120.0);
+            segmented(
+                ui,
+                &mut self.remove,
+                &[(false, "Keep selection"), (true, "Cut selection out")],
+                120.0,
+            );
         });
         if !self.remove {
             setting(ui, I_FLASH, "Cutting", "", |ui| {
-                segmented(ui, &mut self.mode, &[(TrimMode::Fast, "Fast (lossless)"), (TrimMode::Precise, "Frame-accurate")], 120.0);
+                segmented(
+                    ui,
+                    &mut self.mode,
+                    &[
+                        (TrimMode::Fast, "Fast (lossless)"),
+                        (TrimMode::Precise, "Frame-accurate"),
+                    ],
+                    120.0,
+                );
             });
             if self.mode == TrimMode::Fast {
-                hint(ui, I_INFO, "Fast copies the video without re-encoding. Cuts snap to the nearest keyframe before the start, so the clip may begin a little early.");
+                hint(
+                    ui,
+                    I_INFO,
+                    "Fast copies the video without re-encoding. Cuts snap to the nearest keyframe before the start, so the clip may begin a little early.",
+                );
             } else {
-                hint(ui, I_INFO, "Frame-accurate re-encodes the clip at near-lossless quality.");
+                hint(
+                    ui,
+                    I_INFO,
+                    "Frame-accurate re-encodes the clip at near-lossless quality.",
+                );
             }
         } else {
-            hint(ui, I_INFO, "The parts before and after the selection are joined and re-encoded at near-lossless quality.");
+            hint(
+                ui,
+                I_INFO,
+                "The parts before and after the selection are joined and re-encoded at near-lossless quality.",
+            );
         }
 
         if footer(ui, self.end > self.start, &labeled(I_SAVE, "Save clip")) {
-            let src_ext = info.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let src_ext = info
+                .path
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
             let fast = self.mode == TrimMode::Fast && !self.remove;
             let ext = if fast || Container::from_ext(&src_ext).is_some() {
-                if src_ext.is_empty() { "mp4".to_string() } else { src_ext }
+                if src_ext.is_empty() {
+                    "mp4".to_string()
+                } else {
+                    src_ext
+                }
             } else if !info.has_video() {
                 "m4a".to_string()
             } else {
                 "mp4".to_string()
             };
             let out = save_as(Some(&info.path), "trimmed", &ext)?;
-            let o = TrimOptions { start: self.start, end: self.end, mode: self.mode, remove: self.remove };
+            let o = TrimOptions {
+                start: self.start,
+                end: self.end,
+                mode: self.mode,
+                remove: self.remove,
+            };
             return job_task("Trimming", edit::build_trim(&info, &out, &o, caps));
         }
         None

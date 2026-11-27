@@ -58,7 +58,15 @@ impl CompressState {
 
     pub fn ui(&mut self, ui: &mut egui::Ui, frames: &mut Frames, caps: &Caps) -> Option<Task> {
         section(ui, "Videos");
-        file_list(ui, frames, &mut self.files, "videos", VIDEO_EXT, "Add one video, or several to compress them all with the same settings", false);
+        file_list(
+            ui,
+            frames,
+            &mut self.files,
+            "videos",
+            VIDEO_EXT,
+            "Add one video, or several to compress them all with the same settings",
+            false,
+        );
 
         section(ui, "Size");
         card(ui, |ui| {
@@ -78,25 +86,42 @@ impl CompressState {
         });
         let first = self.files.iter().find_map(|f| f.video()).cloned();
         if self.level == Level::Target {
-            setting(ui, I_PACKAGE, "Target size", "For each video. Encoded in two passes to land close to it.", |ui| {
-                ui.add(egui::DragValue::new(&mut self.target_mb).range(0.5..=100_000.0).speed(0.5).suffix(" MB").max_decimals(1));
-                for mb in [50.0, 25.0, 10.0, 8.0] {
-                    if ui.small_button(format!("{mb} MB")).clicked() {
-                        self.target_mb = mb;
+            setting(
+                ui,
+                I_PACKAGE,
+                "Target size",
+                "For each video. Encoded in two passes to land close to it.",
+                |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.target_mb)
+                            .range(0.5..=100_000.0)
+                            .speed(0.5)
+                            .suffix(" MB")
+                            .max_decimals(1),
+                    );
+                    for mb in [50.0, 25.0, 10.0, 8.0] {
+                        if ui.small_button(format!("{mb} MB")).clicked() {
+                            self.target_mb = mb;
+                        }
                     }
-                }
-                if let Some(i) = &first
-                    && ui.small_button("Half").on_hover_text("Half of the first video's size").clicked()
-                {
-                    self.target_mb = (i.size as f64 / 1024.0 / 1024.0 / 2.0 * 10.0).round() / 10.0;
-                }
-            });
+                    if let Some(i) = &first
+                        && ui
+                            .small_button("Half")
+                            .on_hover_text("Half of the first video's size")
+                            .clicked()
+                    {
+                        self.target_mb =
+                            (i.size as f64 / 1024.0 / 1024.0 / 2.0 * 10.0).round() / 10.0;
+                    }
+                },
+            );
         }
 
         // What the settings mean for the first video.
         if let Some(info) = &first {
             let opts = self.options();
-            let (_, audio_bps) = compress::audio_args(info, opts.audio, compress::container(opts.codec));
+            let (_, audio_bps) =
+                compress::audio_args(info, opts.audio, compress::container(opts.codec));
             match compress::plan(info, &opts, audio_bps) {
                 Ok(plan) => {
                     let mut parts = vec![format!("Original: {}", human_size(info.size))];
@@ -117,50 +142,111 @@ impl CompressState {
 
         section(ui, "Video");
         let o = &mut self.opts;
-        setting(ui, I_VIDEO, "Video codec", "H.265 and AV1 give smaller files at the same quality, but encode slower", |ui| {
-            codec_combo(ui, "c_codec", &mut o.codec, &VideoCodec::ALL, caps);
-        });
-        setting(ui, I_FLASH, "Encoder", "GPU encoding is much faster; the CPU makes smaller files", |ui| {
-            backend_combo(ui, "c_backend", &mut o.backend, o.codec, caps);
-        });
-        setting(ui, I_SPEED, "Encoding speed", "Slower settings squeeze out a smaller file", |ui| {
-            let items: Vec<(Speed, &str)> = Speed::ALL.iter().rev().map(|s| (*s, s.name())).collect();
-            combo(ui, "c_speed", &mut o.speed, &items);
-        });
-        setting(ui, I_RESIZE, "Resolution", "Lower resolutions make much smaller files. Never upscales.", |ui| {
-            let mut items: Vec<(Resolution, String)> = vec![(Resolution::Original, "Keep original".into())];
-            if self.level == Level::Target {
-                items.push((Resolution::Auto, "Automatic (best for the size)".into()));
-            }
-            items.extend(HEIGHTS.iter().map(|&h| (Resolution::Limit(h), format!("{}p", h))));
-            let refs: Vec<(Resolution, &str)> = items.iter().map(|(r, s)| (*r, s.as_str())).collect();
-            combo(ui, "c_res", &mut o.resolution, &refs);
-        });
-        setting(ui, I_CLOCK, "Frame rate", "30 fps is plenty for most videos", |ui| {
-            combo(ui, "c_fps", &mut o.max_fps, &[(None, "Keep original"), (Some(60), "60 fps at most"), (Some(30), "30 fps at most"), (Some(24), "24 fps at most")]);
-        });
+        setting(
+            ui,
+            I_VIDEO,
+            "Video codec",
+            "H.265 and AV1 give smaller files at the same quality, but encode slower",
+            |ui| {
+                codec_combo(ui, "c_codec", &mut o.codec, &VideoCodec::ALL, caps);
+            },
+        );
+        setting(
+            ui,
+            I_FLASH,
+            "Encoder",
+            "GPU encoding is much faster; the CPU makes smaller files",
+            |ui| {
+                backend_combo(ui, "c_backend", &mut o.backend, o.codec, caps);
+            },
+        );
+        setting(
+            ui,
+            I_SPEED,
+            "Encoding speed",
+            "Slower settings squeeze out a smaller file",
+            |ui| {
+                let items: Vec<(Speed, &str)> =
+                    Speed::ALL.iter().rev().map(|s| (*s, s.name())).collect();
+                combo(ui, "c_speed", &mut o.speed, &items);
+            },
+        );
+        setting(
+            ui,
+            I_RESIZE,
+            "Resolution",
+            "Lower resolutions make much smaller files. Never upscales.",
+            |ui| {
+                let mut items: Vec<(Resolution, String)> =
+                    vec![(Resolution::Original, "Keep original".into())];
+                if self.level == Level::Target {
+                    items.push((Resolution::Auto, "Automatic (best for the size)".into()));
+                }
+                items.extend(
+                    HEIGHTS
+                        .iter()
+                        .map(|&h| (Resolution::Limit(h), format!("{}p", h))),
+                );
+                let refs: Vec<(Resolution, &str)> =
+                    items.iter().map(|(r, s)| (*r, s.as_str())).collect();
+                combo(ui, "c_res", &mut o.resolution, &refs);
+            },
+        );
+        setting(
+            ui,
+            I_CLOCK,
+            "Frame rate",
+            "30 fps is plenty for most videos",
+            |ui| {
+                combo(
+                    ui,
+                    "c_fps",
+                    &mut o.max_fps,
+                    &[
+                        (None, "Keep original"),
+                        (Some(60), "60 fps at most"),
+                        (Some(30), "30 fps at most"),
+                        (Some(24), "24 fps at most"),
+                    ],
+                );
+            },
+        );
 
         section(ui, "Audio");
-        setting(ui, I_AUDIO, "Audio", "Copying keeps the sound untouched when possible", |ui| {
-            combo(
-                ui,
-                "c_audio",
-                &mut o.audio,
-                &[
-                    (AudioMode::Keep, "Keep original"),
-                    (AudioMode::Encode(192), "192 kbps (high)"),
-                    (AudioMode::Encode(128), "128 kbps (good)"),
-                    (AudioMode::Encode(96), "96 kbps"),
-                    (AudioMode::Encode(64), "64 kbps (voice)"),
-                    (AudioMode::Remove, "Remove audio"),
-                ],
-            );
-        });
+        setting(
+            ui,
+            I_AUDIO,
+            "Audio",
+            "Copying keeps the sound untouched when possible",
+            |ui| {
+                combo(
+                    ui,
+                    "c_audio",
+                    &mut o.audio,
+                    &[
+                        (AudioMode::Keep, "Keep original"),
+                        (AudioMode::Encode(192), "192 kbps (high)"),
+                        (AudioMode::Encode(128), "128 kbps (good)"),
+                        (AudioMode::Encode(96), "96 kbps"),
+                        (AudioMode::Encode(64), "64 kbps (voice)"),
+                        (AudioMode::Remove, "Remove audio"),
+                    ],
+                );
+            },
+        );
 
-        let ready: Vec<_> = self.files.iter().filter_map(|f| f.video().cloned()).collect();
+        let ready: Vec<_> = self
+            .files
+            .iter()
+            .filter_map(|f| f.video().cloned())
+            .collect();
         let loading = self.files.iter().any(|f| f.loading());
         let n = ready.len();
-        let label = if n > 1 { format!("Compress {n} videos") } else { "Compress & save".into() };
+        let label = if n > 1 {
+            format!("Compress {n} videos")
+        } else {
+            "Compress & save".into()
+        };
         if footer(ui, n > 0 && !loading, &labeled(I_SAVE, &label)) {
             let opts = self.options();
             let ext = compress::container(opts.codec).ext();
@@ -172,7 +258,9 @@ impl CompressState {
             }
             let dir = pick_folder(Some(&ready[0].path))?;
             let items = batch_outputs(ready, &dir, "compressed", |_| ext.to_string());
-            return batch_task("Compressing", "Compressed", items, move |i, out| compress::build(i, out, &opts, &caps));
+            return batch_task("Compressing", "Compressed", items, move |i, out| {
+                compress::build(i, out, &opts, &caps)
+            });
         }
         None
     }

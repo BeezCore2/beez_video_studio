@@ -25,13 +25,24 @@ impl SpeedState {
             ui.horizontal_wrapped(|ui| {
                 for f in [0.25, 0.5, 0.75, 1.25, 1.5, 2.0, 3.0, 4.0, 8.0] {
                     let selected = (o.factor - f).abs() < 1e-6;
-                    if ui.add(egui::Button::selectable(selected, format!("{f}×")).min_size(egui::Vec2::new(56.0, 32.0))).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::selectable(selected, format!("{f}×"))
+                                .min_size(egui::Vec2::new(56.0, 32.0)),
+                        )
+                        .clicked()
+                    {
                         o.factor = f;
                     }
                 }
             });
             ui.add_space(6.0);
-            ui.add(egui::Slider::new(&mut o.factor, 0.1..=16.0).logarithmic(true).suffix("×").max_decimals(2));
+            ui.add(
+                egui::Slider::new(&mut o.factor, 0.1..=16.0)
+                    .logarithmic(true)
+                    .suffix("×")
+                    .max_decimals(2),
+            );
             ui.add_space(4.0);
             caption(
                 ui,
@@ -45,9 +56,15 @@ impl SpeedState {
 
         if info.has_audio() {
             section(ui, "Audio");
-            setting(ui, I_AUDIO, "Keep natural pitch", "Voices sound normal instead of high (fast) or deep (slow)", |ui| {
-                ui.checkbox(&mut o.keep_pitch, "");
-            });
+            setting(
+                ui,
+                I_AUDIO,
+                "Keep natural pitch",
+                "Voices sound normal instead of high (fast) or deep (slow)",
+                |ui| {
+                    ui.checkbox(&mut o.keep_pitch, "");
+                },
+            );
             setting(ui, I_VOLUME, "Mute", "Leave the audio out", |ui| {
                 ui.checkbox(&mut o.mute, "");
             });
@@ -60,7 +77,11 @@ impl SpeedState {
 
         let ok = (o.factor - 1.0).abs() > 1e-6;
         if footer(ui, ok, &labeled(I_SAVE, "Save")) {
-            let src_ext = info.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let src_ext = info
+                .path
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
             let ext = match Container::from_ext(&src_ext) {
                 Some(c) => c.ext().to_string(),
                 None if info.has_video() => "mp4".into(),

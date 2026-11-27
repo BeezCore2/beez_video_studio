@@ -282,7 +282,14 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
         .with_context(|| format!("Could not open {}", path.display()))?
         .len();
     let out = ffmpeg::command(&t.ffprobe)
-        .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"])
+        .args([
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+        ])
         .arg(path)
         .output()
         .context("Could not start ffprobe")?;

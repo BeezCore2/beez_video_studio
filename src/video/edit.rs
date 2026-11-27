@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::codec::{
-    Args, Backend, Container, Rate, Speed, VideoCodec, crop_to_ratio, even,
-    fit_inside, fit_short_side, keep_ten_bit,
+    Args, Backend, Container, Rate, Speed, VideoCodec, crop_to_ratio, even, fit_inside,
+    fit_short_side, keep_ten_bit,
 };
 use super::compress::{AudioMode, audio_args, input};
 use super::ffmpeg::Caps;
@@ -34,10 +34,20 @@ fn reencode_codec(info: &MediaInfo, c: Container) -> VideoCodec {
 }
 
 /// Video encode settings for edits.
-fn video_encode(info: &MediaInfo, c: Container, caps: &Caps, backend: Backend) -> (Args, Option<String>) {
+fn video_encode(
+    info: &MediaInfo,
+    c: Container,
+    caps: &Caps,
+    backend: Backend,
+) -> (Args, Option<String>) {
     let codec = reencode_codec(info, c);
     let backend = codec.resolve(backend, caps);
-    let args = codec.args(backend, Rate::Quality(EDIT_CRF), Speed::Balanced, keep_ten_bit(info, codec));
+    let args = codec.args(
+        backend,
+        Rate::Quality(EDIT_CRF),
+        Speed::Balanced,
+        keep_ten_bit(info, codec),
+    );
     (args, codec.encoder(backend))
 }
 
@@ -91,9 +101,19 @@ pub fn build_trim(info: &MediaInfo, out: &Path, o: &TrimOptions, caps: &Caps) ->
         if at_start || at_end {
             // Removing an edge is the same as keeping the rest.
             let keep = if at_start {
-                TrimOptions { start: end, end: dur, mode: TrimMode::Precise, remove: false }
+                TrimOptions {
+                    start: end,
+                    end: dur,
+                    mode: TrimMode::Precise,
+                    remove: false,
+                }
             } else {
-                TrimOptions { start: 0.0, end: start, mode: TrimMode::Precise, remove: false }
+                TrimOptions {
+                    start: 0.0,
+                    end: start,
+                    mode: TrimMode::Precise,
+                    remove: false,
+                }
             };
             return build_trim(info, out, &keep, caps);
         }
@@ -108,7 +128,9 @@ pub fn build_trim(info: &MediaInfo, out: &Path, o: &TrimOptions, caps: &Caps) ->
     let mut encoder = None;
     match o.mode {
         TrimMode::Fast => {
-            a.pair("-map", "0:v?").pair("-map", "0:a?").pair("-c", "copy");
+            a.pair("-map", "0:v?")
+                .pair("-map", "0:a?")
+                .pair("-c", "copy");
             // Start timestamps at zero so players don't show a black gap.
             a.pair("-avoid_negative_ts", "make_zero");
             encoder = info.video.as_ref().map(|v| v.codec.clone());
@@ -126,17 +148,31 @@ pub fn build_trim(info: &MediaInfo, out: &Path, o: &TrimOptions, caps: &Caps) ->
     }
     a.extend(c.mux_args(encoder.as_deref()));
     let job = Job::new(Output::File(out.to_path_buf()), "Saved");
-    let stage = format!("Trimming {} – {}", fmt_time(start, false), fmt_time(end, false));
+    let stage = format!(
+        "Trimming {} – {}",
+        fmt_time(start, false),
+        fmt_time(end, false)
+    );
     Ok(job.pass(Pass::new(a, stage, length)))
 }
 
 /// Keep `0..start` and `end..`, joined (re-encoded with trim + concat filters).
-fn build_cut_out(info: &MediaInfo, out: &Path, start: f64, end: f64, c: Container, caps: &Caps) -> Result<Job> {
+fn build_cut_out(
+    info: &MediaInfo,
+    out: &Path,
+    start: f64,
+    end: f64,
+    c: Container,
+    caps: &Caps,
+) -> Result<Job> {
     let has_v = info.has_video();
     let has_a = info.has_audio();
     let mut g = Vec::new();
     let mut pairs = String::new();
-    for (i, range) in [format!("end={start:.3}"), format!("start={end:.3}")].iter().enumerate() {
+    for (i, range) in [format!("end={start:.3}"), format!("start={end:.3}")]
+        .iter()
+        .enumerate()
+    {
         if has_v {
             g.push(format!("[0:v:0]trim={range},setpts=PTS-STARTPTS[v{i}]"));
             pairs.push_str(&format!("[v{i}]"));
@@ -153,7 +189,10 @@ fn build_cut_out(info: &MediaInfo, out: &Path, start: f64, end: f64, c: Containe
     if has_a {
         outs.push_str("[a]");
     }
-    g.push(format!("{pairs}concat=n=2:v={}:a={}{outs}", has_v as u8, has_a as u8));
+    g.push(format!(
+        "{pairs}concat=n=2:v={}:a={}{outs}",
+        has_v as u8, has_a as u8
+    ));
 
     let mut a = input(&info.path);
     a.pair("-filter_complex", g.join(";"));
@@ -169,7 +208,11 @@ fn build_cut_out(info: &MediaInfo, out: &Path, start: f64, end: f64, c: Containe
     a.extend(c.mux_args(encoder.as_deref()));
     let length = (info.duration - (end - start)).max(0.0);
     let job = Job::new(Output::File(out.to_path_buf()), "Saved");
-    let stage = format!("Removing {} – {}", fmt_time(start, false), fmt_time(end, false));
+    let stage = format!(
+        "Removing {} – {}",
+        fmt_time(start, false),
+        fmt_time(end, false)
+    );
     Ok(job.pass(Pass::new(a, stage, length)))
 }
 
@@ -182,19 +225,29 @@ pub fn join_mismatch(clips: &[MediaInfo]) -> Option<String> {
     let first = clips.first()?;
     let fv = first.video.as_ref()?;
     for c in &clips[1..] {
-        let name = c.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = c
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let Some(v) = &c.video else {
             return Some(format!("{name} has no video"));
         };
         if v.codec != fv.codec {
-            return Some(format!("{name} uses {} instead of {}", v.codec.to_uppercase(), fv.codec.to_uppercase()));
+            return Some(format!(
+                "{name} uses {} instead of {}",
+                v.codec.to_uppercase(),
+                fv.codec.to_uppercase()
+            ));
         }
         if v.display_size() != fv.display_size() {
             let (w, h) = v.display_size();
             return Some(format!("{name} is {w}×{h}"));
         }
         if v.pix_fmt != fv.pix_fmt || (v.fps - fv.fps).abs() > 0.01 {
-            return Some(format!("{name} has a different frame rate or colour format"));
+            return Some(format!(
+                "{name} has a different frame rate or colour format"
+            ));
         }
         if c.audio.len() != first.audio.len() {
             return Some(format!("{name} has a different number of audio tracks"));
@@ -213,7 +266,12 @@ fn concat_quote(p: &Path) -> String {
     format!("'{}'", p.to_string_lossy().replace('\'', "'\\''"))
 }
 
-pub fn build_join(clips: &[MediaInfo], out: &Path, force_reencode: bool, caps: &Caps) -> Result<Job> {
+pub fn build_join(
+    clips: &[MediaInfo],
+    out: &Path,
+    force_reencode: bool,
+    caps: &Caps,
+) -> Result<Job> {
     if clips.len() < 2 {
         bail!("Add at least two videos to join.");
     }
@@ -233,8 +291,13 @@ pub fn build_join(clips: &[MediaInfo], out: &Path, force_reencode: bool, caps: &
         }
         std::fs::write(&list, text).context("Could not write the list of clips")?;
         let mut a = Args::new();
-        a.pair("-f", "concat").pair("-safe", "0").push("-i").push(&list);
-        a.pair("-map", "0:v?").pair("-map", "0:a?").pair("-c", "copy");
+        a.pair("-f", "concat")
+            .pair("-safe", "0")
+            .push("-i")
+            .push(&list);
+        a.pair("-map", "0:v?")
+            .pair("-map", "0:a?")
+            .pair("-c", "copy");
         let codec = clips[0].video.as_ref().map(|v| v.codec.clone());
         a.extend(c.mux_args(codec.as_deref()));
         job.temp.push(list);
@@ -246,7 +309,11 @@ pub fn build_join(clips: &[MediaInfo], out: &Path, force_reencode: bool, caps: &
     let fv = clips[0].video.as_ref().expect("checked above");
     let (w, h) = fv.display_size();
     let (w, h) = (even(w as f64), even(h as f64));
-    let fps = if fv.fps > 0.0 { fv.fps.min(120.0) } else { 30.0 };
+    let fps = if fv.fps > 0.0 {
+        fv.fps.min(120.0)
+    } else {
+        30.0
+    };
     let any_audio = clips.iter().any(|c| c.has_audio());
 
     let mut a = Args::new();
@@ -409,7 +476,12 @@ pub fn transform_filters(w: u32, h: u32, o: &TransformOptions) -> (Vec<String>, 
     (f, (w, h))
 }
 
-pub fn build_transform(info: &MediaInfo, out: &Path, o: &TransformOptions, caps: &Caps) -> Result<Job> {
+pub fn build_transform(
+    info: &MediaInfo,
+    out: &Path,
+    o: &TransformOptions,
+    caps: &Caps,
+) -> Result<Job> {
     let Some(v) = &info.video else {
         bail!("This file has no video.");
     };
@@ -423,7 +495,9 @@ pub fn build_transform(info: &MediaInfo, out: &Path, o: &TransformOptions, caps:
         let mut a = Args::new();
         a.pair("-display_rotation", ccw.to_string());
         a.push("-i").push(&info.path);
-        a.pair("-map", "0:v:0").pair("-map", "0:a?").pair("-c", "copy");
+        a.pair("-map", "0:v:0")
+            .pair("-map", "0:a?")
+            .pair("-c", "copy");
         a.extend(c.mux_args(Some(&v.codec)));
         return Ok(job.pass(Pass::new(a, "Rotating (no quality loss)", info.duration)));
     }
@@ -478,7 +552,12 @@ pub struct SpeedOptions {
 
 impl Default for SpeedOptions {
     fn default() -> Self {
-        Self { factor: 2.0, keep_pitch: true, mute: false, backend: Backend::Cpu }
+        Self {
+            factor: 2.0,
+            keep_pitch: true,
+            mute: false,
+            backend: Backend::Cpu,
+        }
     }
 }
 
@@ -493,7 +572,8 @@ pub fn build_speed(info: &MediaInfo, out: &Path, o: &SpeedOptions, caps: &Caps) 
     let mut a = input(&info.path);
     let mut enc = None;
     if info.has_video() {
-        a.pair("-map", "0:v:0").pair("-vf", format!("setpts=PTS/{}", o.factor));
+        a.pair("-map", "0:v:0")
+            .pair("-vf", format!("setpts=PTS/{}", o.factor));
         let (venc, e) = video_encode(info, c, caps, o.backend);
         a.extend(venc);
         enc = e;
@@ -501,9 +581,15 @@ pub fn build_speed(info: &MediaInfo, out: &Path, o: &SpeedOptions, caps: &Caps) 
     if info.has_audio() && !o.mute {
         let sr = info.audio[0].sample_rate.max(8000);
         let mut chain: Vec<String> = if o.keep_pitch {
-            atempo_chain(o.factor).iter().map(|s| format!("atempo={s}")).collect()
+            atempo_chain(o.factor)
+                .iter()
+                .map(|s| format!("atempo={s}"))
+                .collect()
         } else {
-            vec![format!("asetrate={}", (sr as f64 * o.factor).round() as u64), format!("aresample={sr}")]
+            vec![
+                format!("asetrate={}", (sr as f64 * o.factor).round() as u64),
+                format!("aresample={sr}"),
+            ]
         };
         let codec = c.default_audio();
         if let Some(f) = codec.filter() {
@@ -516,7 +602,11 @@ pub fn build_speed(info: &MediaInfo, out: &Path, o: &SpeedOptions, caps: &Caps) 
     }
     a.extend(c.mux_args(enc.as_deref()));
     let job = Job::new(Output::File(out.to_path_buf()), "Saved");
-    Ok(job.pass(Pass::new(a, format!("Changing speed to {}×", o.factor), info.duration / o.factor)))
+    Ok(job.pass(Pass::new(
+        a,
+        format!("Changing speed to {}×", o.factor),
+        info.duration / o.factor,
+    )))
 }
 
 #[cfg(test)]
@@ -538,7 +628,12 @@ mod tests {
                 ..Default::default()
             }),
             audio: if audio {
-                vec![AudioStream { codec: "aac".into(), sample_rate: 44100, channels: 2, ..Default::default() }]
+                vec![AudioStream {
+                    codec: "aac".into(),
+                    sample_rate: 44100,
+                    channels: 2,
+                    ..Default::default()
+                }]
             } else {
                 vec![]
             },
@@ -554,7 +649,12 @@ mod tests {
     #[test]
     fn fast_and_precise_trim() {
         let i = clip("in.mp4", 1920, 1080, "h264", true);
-        let o = TrimOptions { start: 2.0, end: 5.5, mode: TrimMode::Fast, remove: false };
+        let o = TrimOptions {
+            start: 2.0,
+            end: 5.5,
+            mode: TrimMode::Fast,
+            remove: false,
+        };
         let job = build_trim(&i, Path::new("o.mp4"), &o, &Caps::default()).unwrap();
         let a = &job.passes[0].args;
         assert!(a.has_pair("-ss", "2.000") && a.has_pair("-t", "3.500"));
@@ -563,7 +663,10 @@ mod tests {
         let s = a.strings();
         assert!(s.iter().position(|x| x == "-ss") < s.iter().position(|x| x == "-i"));
 
-        let o = TrimOptions { mode: TrimMode::Precise, ..o };
+        let o = TrimOptions {
+            mode: TrimMode::Precise,
+            ..o
+        };
         let job = build_trim(&i, Path::new("o.mp4"), &o, &Caps::default()).unwrap();
         let a = &job.passes[0].args;
         assert!(a.has_pair("-c:v", "libx264") && a.has_pair("-crf", "18"));
@@ -574,14 +677,23 @@ mod tests {
         let job = build_trim(&i265, Path::new("o.mp4"), &o, &Caps::default()).unwrap();
         assert!(job.passes[0].args.has_pair("-c:v", "libx265"));
 
-        let bad = TrimOptions { start: 5.0, end: 5.0, ..o };
+        let bad = TrimOptions {
+            start: 5.0,
+            end: 5.0,
+            ..o
+        };
         assert!(build_trim(&i, Path::new("o.mp4"), &bad, &Caps::default()).is_err());
     }
 
     #[test]
     fn cut_out_middle() {
         let i = clip("in.mp4", 1920, 1080, "h264", true);
-        let o = TrimOptions { start: 3.0, end: 4.0, mode: TrimMode::Fast, remove: true };
+        let o = TrimOptions {
+            start: 3.0,
+            end: 4.0,
+            mode: TrimMode::Fast,
+            remove: true,
+        };
         let job = build_trim(&i, Path::new("o.mp4"), &o, &Caps::default()).unwrap();
         let fc = arg_after(&job.passes[0].args, "-filter_complex");
         assert!(fc.contains("[0:v:0]trim=end=3.000,setpts=PTS-STARTPTS[v0]"));
@@ -590,16 +702,29 @@ mod tests {
         assert_eq!(job.passes[0].duration, 9.0);
 
         // Removing the beginning = keeping the rest.
-        let o = TrimOptions { start: 0.0, end: 4.0, mode: TrimMode::Fast, remove: true };
+        let o = TrimOptions {
+            start: 0.0,
+            end: 4.0,
+            mode: TrimMode::Fast,
+            remove: true,
+        };
         let job = build_trim(&i, Path::new("o.mp4"), &o, &Caps::default()).unwrap();
         assert!(job.passes[0].args.has_pair("-ss", "4.000"));
-        let all = TrimOptions { start: 0.0, end: 10.0, mode: TrimMode::Fast, remove: true };
+        let all = TrimOptions {
+            start: 0.0,
+            end: 10.0,
+            mode: TrimMode::Fast,
+            remove: true,
+        };
         assert!(build_trim(&i, Path::new("o.mp4"), &all, &Caps::default()).is_err());
     }
 
     #[test]
     fn join_lossless_when_compatible() {
-        let clips = [clip("a.mp4", 1280, 720, "h264", true), clip("b's.mp4", 1280, 720, "h264", true)];
+        let clips = [
+            clip("a.mp4", 1280, 720, "h264", true),
+            clip("b's.mp4", 1280, 720, "h264", true),
+        ];
         assert_eq!(join_mismatch(&clips), None);
         let job = build_join(&clips, Path::new("o.mp4"), false, &Caps::default()).unwrap();
         let a = &job.passes[0].args;
@@ -622,20 +747,41 @@ mod tests {
         assert!(a.has_pair("-i", "anullsrc=r=48000:cl=stereo"));
         let fc = arg_after(a, "-filter_complex");
         assert!(fc.contains("[1:v:0]scale=1920:1080:force_original_aspect_ratio=decrease"));
-        assert!(fc.contains("[2:a:0]aformat"), "silence for the silent clip: {fc}");
+        assert!(
+            fc.contains("[2:a:0]aformat"),
+            "silence for the silent clip: {fc}"
+        );
         assert!(fc.ends_with("[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]"));
     }
 
     #[test]
     fn transforms() {
-        let o = TransformOptions { rotate: 90, crop: Some((1, 1)), resize: Resize::Short(720), ..Default::default() };
+        let o = TransformOptions {
+            rotate: 90,
+            crop: Some((1, 1)),
+            resize: Resize::Short(720),
+            ..Default::default()
+        };
         let (f, size) = transform_filters(1920, 1080, &o);
-        assert_eq!(f, ["transpose=clock", "crop=1080:1080:0:420", "scale=720:720:flags=lanczos"]);
+        assert_eq!(
+            f,
+            [
+                "transpose=clock",
+                "crop=1080:1080:0:420",
+                "scale=720:720:flags=lanczos"
+            ]
+        );
         assert_eq!(size, (720, 720));
 
-        let o = TransformOptions { resize: Resize::Pad(1080, 1920), ..Default::default() };
+        let o = TransformOptions {
+            resize: Resize::Pad(1080, 1920),
+            ..Default::default()
+        };
         let (f, size) = transform_filters(1920, 1080, &o);
-        assert_eq!(f[0], "scale=1080:608:flags=lanczos,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1");
+        assert_eq!(
+            f[0],
+            "scale=1080:608:flags=lanczos,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
+        );
         assert_eq!(size, (1080, 1920));
     }
 
@@ -643,7 +789,10 @@ mod tests {
     fn lossless_rotation_combines_with_existing() {
         let mut i = clip("in.mp4", 1920, 1080, "h264", true);
         i.video.as_mut().unwrap().rotation = 270; // phone video: shown 90° clockwise
-        let o = TransformOptions { rotate: 90, ..Default::default() };
+        let o = TransformOptions {
+            rotate: 90,
+            ..Default::default()
+        };
         assert!(o.rotation_only());
         let job = build_transform(&i, Path::new("o.mp4"), &o, &Caps::default()).unwrap();
         let a = &job.passes[0].args;
@@ -661,15 +810,35 @@ mod tests {
         assert_eq!(atempo_chain(0.25), [0.5, 0.5]);
         assert_eq!(atempo_chain(1.0), [1.0]);
         let i = clip("in.mp4", 1280, 720, "h264", true);
-        let job = build_speed(&i, Path::new("o.mp4"), &SpeedOptions { factor: 4.0, ..Default::default() }, &Caps::default()).unwrap();
+        let job = build_speed(
+            &i,
+            Path::new("o.mp4"),
+            &SpeedOptions {
+                factor: 4.0,
+                ..Default::default()
+            },
+            &Caps::default(),
+        )
+        .unwrap();
         let a = &job.passes[0].args;
         assert!(a.has_pair("-vf", "setpts=PTS/4"));
         assert!(a.has_pair("-af", "atempo=2,atempo=2"));
         assert_eq!(job.passes[0].duration, 2.5);
-        let o = SpeedOptions { factor: 0.5, keep_pitch: false, ..Default::default() };
+        let o = SpeedOptions {
+            factor: 0.5,
+            keep_pitch: false,
+            ..Default::default()
+        };
         let job = build_speed(&i, Path::new("o.mp4"), &o, &Caps::default()).unwrap();
-        assert!(job.passes[0].args.has_pair("-af", "asetrate=22050,aresample=44100"));
-        let o = SpeedOptions { factor: 1.0, ..Default::default() };
+        assert!(
+            job.passes[0]
+                .args
+                .has_pair("-af", "asetrate=22050,aresample=44100")
+        );
+        let o = SpeedOptions {
+            factor: 1.0,
+            ..Default::default()
+        };
         assert!(build_speed(&i, Path::new("o.mp4"), &o, &Caps::default()).is_err());
     }
 }

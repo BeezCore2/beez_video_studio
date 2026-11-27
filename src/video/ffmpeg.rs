@@ -401,7 +401,10 @@ pub fn grab_frame(path: &Path, secs: f64, width: u32) -> Result<Vec<u8>> {
     let t = require()?;
     let out = command(&t.ffmpeg)
         .args(["-hide_banner", "-loglevel", "error"])
-        .args([OsStr::new("-ss"), OsStr::new(&format!("{:.3}", secs.max(0.0)))])
+        .args([
+            OsStr::new("-ss"),
+            OsStr::new(&format!("{:.3}", secs.max(0.0))),
+        ])
         .arg("-i")
         .arg(path)
         .args(["-frames:v", "1", "-an", "-sn", "-vf"])
@@ -412,7 +415,10 @@ pub fn grab_frame(path: &Path, secs: f64, width: u32) -> Result<Vec<u8>> {
         .output()
         .context("Could not start FFmpeg")?;
     if out.stdout.is_empty() {
-        bail!("{}", explain(&String::from_utf8_lossy(&out.stderr), out.status.code()));
+        bail!(
+            "{}",
+            explain(&String::from_utf8_lossy(&out.stderr), out.status.code())
+        );
     }
     Ok(out.stdout)
 }

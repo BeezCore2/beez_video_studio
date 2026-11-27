@@ -134,7 +134,12 @@ pub fn audio_args(info: &MediaInfo, mode: AudioMode, container: Container) -> (A
 }
 
 /// The video filter chain (`scale`, `fps`) for the options, given the bitrate in target mode.
-fn video_filters(info: &MediaInfo, opts: &Options, codec: VideoCodec, video_bps: Option<u64>) -> Vec<String> {
+fn video_filters(
+    info: &MediaInfo,
+    opts: &Options,
+    codec: VideoCodec,
+    video_bps: Option<u64>,
+) -> Vec<String> {
     let Some(v) = &info.video else {
         return Vec::new();
     };
@@ -184,7 +189,9 @@ pub fn plan(info: &MediaInfo, opts: &Options, audio_bps: u64) -> Result<Plan> {
         Mode::Quality(_) => None,
         Mode::TargetSize(mb) => {
             if info.duration <= 0.0 {
-                bail!("The video's length is unknown, so a target size cannot be used. Use a quality level instead.");
+                bail!(
+                    "The video's length is unknown, so a target size cannot be used. Use a quality level instead."
+                );
             }
             let budget = mb * 1024.0 * 1024.0 * 8.0 * 0.98 / info.duration;
             let video_bps = budget - audio_bps as f64;
@@ -196,7 +203,9 @@ pub fn plan(info: &MediaInfo, opts: &Options, audio_bps: u64) -> Result<Plan> {
                 );
             }
             if (mb * 1024.0 * 1024.0) as u64 >= info.size {
-                bail!("The video is already smaller than {mb:.1} MB. Choose a smaller target size.");
+                bail!(
+                    "The video is already smaller than {mb:.1} MB. Choose a smaller target size."
+                );
             }
             Some(video_bps as u64)
         }
@@ -262,14 +271,24 @@ pub fn build(info: &MediaInfo, out: &Path, opts: &Options, caps: &Caps) -> Resul
         let log = temp_prefix("2pass");
         let log_s = log.to_string_lossy().into_owned();
         let mut first = input(&info.path);
-        first.extend(video.clone()).extend(codec.pass_args(1, &log_s));
+        first
+            .extend(video.clone())
+            .extend(codec.pass_args(1, &log_s));
         merge_x265_params(&mut first);
         first.push("-an");
         job = job
-            .pass(Pass::new(first, "Analysing (pass 1 of 2)", info.duration).null().weight(0.35))
             .pass(
-                Pass::new(main(codec.pass_args(2, &log_s)), format!("{stage} (pass 2 of 2)"), info.duration)
-                    .weight(0.65),
+                Pass::new(first, "Analysing (pass 1 of 2)", info.duration)
+                    .null()
+                    .weight(0.35),
+            )
+            .pass(
+                Pass::new(
+                    main(codec.pass_args(2, &log_s)),
+                    format!("{stage} (pass 2 of 2)"),
+                    info.duration,
+                )
+                .weight(0.65),
             );
         job.temp.push(format!("{log_s}*").into());
     } else {
@@ -326,11 +345,18 @@ mod tests {
     #[test]
     fn keeps_compatible_audio_untouched() {
         let info = sample();
-        let opts = Options { audio: AudioMode::Keep, ..Default::default() };
+        let opts = Options {
+            audio: AudioMode::Keep,
+            ..Default::default()
+        };
         let job = build(&info, Path::new("o.mp4"), &opts, &caps()).unwrap();
         assert!(job.passes[0].args.has_pair("-c:a", "copy"));
         // WebM cannot hold AAC: re-encoded as Opus.
-        let opts = Options { audio: AudioMode::Keep, codec: VideoCodec::Vp9, ..Default::default() };
+        let opts = Options {
+            audio: AudioMode::Keep,
+            codec: VideoCodec::Vp9,
+            ..Default::default()
+        };
         let job = build(&info, Path::new("o.webm"), &opts, &caps()).unwrap();
         assert!(job.passes[0].args.has_pair("-c:a", "libopus"));
     }
@@ -354,7 +380,12 @@ mod tests {
         let p2 = &job.passes[1].args;
         assert!(p2.has_pair("-pass", "2"));
         // 694 kbps for a 1080p60 source → scaled down, and capped to 30 fps.
-        let vf = p2.strings().iter().position(|a| a == "-vf").map(|i| p2.strings()[i + 1].clone()).unwrap();
+        let vf = p2
+            .strings()
+            .iter()
+            .position(|a| a == "-vf")
+            .map(|i| p2.strings()[i + 1].clone())
+            .unwrap();
         assert_eq!(vf, "scale=854:480:flags=lanczos,fps=30");
         assert_eq!(job.temp.len(), 1);
     }
@@ -362,20 +393,39 @@ mod tests {
     #[test]
     fn target_size_validation() {
         let info = sample();
-        let tiny = Options { mode: Mode::TargetSize(0.5), ..Default::default() };
-        let err = build(&info, Path::new("o.mp4"), &tiny, &caps()).unwrap_err().to_string();
+        let tiny = Options {
+            mode: Mode::TargetSize(0.5),
+            ..Default::default()
+        };
+        let err = build(&info, Path::new("o.mp4"), &tiny, &caps())
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("too small"), "{err}");
-        let huge = Options { mode: Mode::TargetSize(500.0), ..Default::default() };
+        let huge = Options {
+            mode: Mode::TargetSize(500.0),
+            ..Default::default()
+        };
         assert!(build(&info, Path::new("o.mp4"), &huge, &caps()).is_err());
     }
 
     #[test]
     fn x265_two_pass_uses_one_params_flag() {
         let info = sample();
-        let opts = Options { mode: Mode::TargetSize(20.0), codec: VideoCodec::H265, ..Default::default() };
+        let opts = Options {
+            mode: Mode::TargetSize(20.0),
+            codec: VideoCodec::H265,
+            ..Default::default()
+        };
         let job = build(&info, Path::new("o.mp4"), &opts, &caps()).unwrap();
         for p in &job.passes {
-            assert_eq!(p.args.strings().iter().filter(|a| *a == "-x265-params").count(), 1);
+            assert_eq!(
+                p.args
+                    .strings()
+                    .iter()
+                    .filter(|a| *a == "-x265-params")
+                    .count(),
+                1
+            );
         }
         assert!(job.passes[1].args.has_pair("-tag:v", "hvc1"));
     }

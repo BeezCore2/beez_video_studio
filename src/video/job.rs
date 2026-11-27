@@ -62,7 +62,10 @@ pub enum Output {
     File(PathBuf),
     /// A numbered series such as `dir/name_0001.jpg`; `pattern` is the FFmpeg pattern
     /// (`name_%04d.jpg`).
-    Series { dir: PathBuf, pattern: String },
+    Series {
+        dir: PathBuf,
+        pattern: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -142,7 +145,12 @@ fn remove_temp(p: &Path) {
 /// and ends with `.jpg`.
 fn series_files(dir: &Path, pattern: &str) -> Vec<PathBuf> {
     let (head, tail) = match pattern.split_once('%') {
-        Some((h, t)) => (h.to_string(), t.split_once('d').map(|(_, e)| e.to_string()).unwrap_or_default()),
+        Some((h, t)) => (
+            h.to_string(),
+            t.split_once('d')
+                .map(|(_, e)| e.to_string())
+                .unwrap_or_default(),
+        ),
         None => (pattern.to_string(), String::new()),
     };
     let mut v: Vec<PathBuf> = fs::read_dir(dir)
@@ -150,7 +158,10 @@ fn series_files(dir: &Path, pattern: &str) -> Vec<PathBuf> {
             r.flatten()
                 .map(|e| e.path())
                 .filter(|p| {
-                    let n = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let n = p
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
                     n.starts_with(&head) && n.ends_with(&tail)
                 })
                 .collect()
@@ -166,11 +177,22 @@ fn percent_change(before: u64, after: u64) -> String {
     }
     let ratio = after as f64 / before as f64;
     if ratio < 0.995 {
-        format!(" · {:.0}% smaller than the original ({})", (1.0 - ratio) * 100.0, human_size(before))
+        format!(
+            " · {:.0}% smaller than the original ({})",
+            (1.0 - ratio) * 100.0,
+            human_size(before)
+        )
     } else if ratio > 1.005 {
-        format!(" · {:.0}% larger than the original ({})", (ratio - 1.0) * 100.0, human_size(before))
+        format!(
+            " · {:.0}% larger than the original ({})",
+            (ratio - 1.0) * 100.0,
+            human_size(before)
+        )
     } else {
-        format!(" · about the same size as the original ({})", human_size(before))
+        format!(
+            " · about the same size as the original ({})",
+            human_size(before)
+        )
     }
 }
 
@@ -190,17 +212,24 @@ pub fn execute_in(job: Job, progress: &Progress, from: f32, to: f32) -> Result<S
             if let Some(dir) = out.parent()
                 && !dir.as_os_str().is_empty()
             {
-                fs::create_dir_all(dir).with_context(|| format!("Could not create {}", dir.display()))?;
+                fs::create_dir_all(dir)
+                    .with_context(|| format!("Could not create {}", dir.display()))?;
             }
             (Some(temp_path(out)), Vec::new())
         }
         Output::Series { dir, pattern } => {
-            fs::create_dir_all(dir).with_context(|| format!("Could not create {}", dir.display()))?;
+            fs::create_dir_all(dir)
+                .with_context(|| format!("Could not create {}", dir.display()))?;
             (None, series_files(dir, pattern))
         }
     };
 
-    let total: f32 = job.passes.iter().map(|p| p.weight.max(0.0)).sum::<f32>().max(1e-6);
+    let total: f32 = job
+        .passes
+        .iter()
+        .map(|p| p.weight.max(0.0))
+        .sum::<f32>()
+        .max(1e-6);
     let mut at = from;
     let n = job.passes.len();
     let mut result = Ok(());
@@ -268,13 +297,27 @@ pub fn execute_in(job: Job, progress: &Progress, from: f32, to: f32) -> Result<S
             }
             if out.exists() {
                 fs::remove_file(out).with_context(|| {
-                    format!("Could not replace {} (is it open in another program?)", out.display())
+                    format!(
+                        "Could not replace {} (is it open in another program?)",
+                        out.display()
+                    )
                 })?;
             }
             fs::rename(&temp, out).with_context(|| format!("Could not save {}", out.display()))?;
-            let name = out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let change = job.source_size.map(|b| percent_change(b, size)).unwrap_or_default();
-            Ok(format!("{} {name} · {}{change} → {}", job.verb, human_size(size), out.display()))
+            let name = out
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let change = job
+                .source_size
+                .map(|b| percent_change(b, size))
+                .unwrap_or_default();
+            Ok(format!(
+                "{} {name} · {}{change} → {}",
+                job.verb,
+                human_size(size),
+                out.display()
+            ))
         }
         (Output::Series { dir, pattern }, Ok(())) => {
             let made = series_files(dir, pattern)
@@ -305,9 +348,18 @@ mod tests {
 
     #[test]
     fn size_change_messages() {
-        assert_eq!(percent_change(1000, 250), " · 75% smaller than the original (1000 B)");
-        assert_eq!(percent_change(1000, 1500), " · 50% larger than the original (1000 B)");
-        assert_eq!(percent_change(1000, 1001), " · about the same size as the original (1000 B)");
+        assert_eq!(
+            percent_change(1000, 250),
+            " · 75% smaller than the original (1000 B)"
+        );
+        assert_eq!(
+            percent_change(1000, 1500),
+            " · 50% larger than the original (1000 B)"
+        );
+        assert_eq!(
+            percent_change(1000, 1001),
+            " · about the same size as the original (1000 B)"
+        );
         assert_eq!(percent_change(0, 5), "");
     }
 
@@ -315,7 +367,14 @@ mod tests {
     fn series_and_prefix_cleanup() {
         let dir = std::env::temp_dir().join(format!("beez-job-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        for f in ["shot_0001.jpg", "shot_0002.jpg", "shot_0001.png", "other.jpg", "log-0.log", "log-0.log.mbtree"] {
+        for f in [
+            "shot_0001.jpg",
+            "shot_0002.jpg",
+            "shot_0001.png",
+            "other.jpg",
+            "log-0.log",
+            "log-0.log.mbtree",
+        ] {
             fs::write(dir.join(f), "x").unwrap();
         }
         let s = series_files(&dir, "shot_%04d.jpg");

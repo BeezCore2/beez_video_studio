@@ -71,7 +71,12 @@ pub fn build(info: &MediaInfo, out: &Path, opts: &Options, caps: &Caps) -> Resul
                 .filter(|vc| c.video_choices().contains(vc))
                 .unwrap_or_else(|| c.default_video());
             let backend = codec.resolve(opts.backend, caps);
-            a.extend(codec.args(backend, Rate::Quality(opts.crf), opts.speed, keep_ten_bit(info, codec)));
+            a.extend(codec.args(
+                backend,
+                Rate::Quality(opts.crf),
+                opts.speed,
+                keep_ten_bit(info, codec),
+            ));
             encoder_name = codec.encoder(backend);
             all_copied = false;
         }
@@ -153,12 +158,20 @@ pub fn build_gif(info: &MediaInfo, out: &Path, o: &GifOptions, caps: &Caps) -> R
     if info.duration > 0.0 && o.start >= info.duration {
         bail!("The start time is past the end of the video.");
     }
-    let mut length = if o.length > 0.0 { o.length } else { (info.duration - o.start).max(0.0) };
+    let mut length = if o.length > 0.0 {
+        o.length
+    } else {
+        (info.duration - o.start).max(0.0)
+    };
     if info.duration > 0.0 {
         length = length.min(info.duration - o.start);
     }
     let (w, _) = v.display_size();
-    let width = if o.width == 0 { w } else { o.width.min(w.max(2)) };
+    let width = if o.width == 0 {
+        w
+    } else {
+        o.width.min(w.max(2))
+    };
     let base = format!("fps={},scale={width}:-2:flags=lanczos", o.fps.clamp(1, 50));
 
     let mut a = Args::new();
@@ -198,7 +211,11 @@ pub fn build_gif(info: &MediaInfo, out: &Path, o: &GifOptions, caps: &Caps) -> R
     }
     a.push("-an");
     let job = Job::new(Output::File(out.to_path_buf()), "Created");
-    Ok(job.pass(Pass::new(a, format!("Making {}", o.format.ext().to_uppercase()), length)))
+    Ok(job.pass(Pass::new(
+        a,
+        format!("Making {}", o.format.ext().to_uppercase()),
+        length,
+    )))
 }
 
 #[cfg(test)]
@@ -219,7 +236,10 @@ mod tests {
                 pix_fmt: "yuv420p".into(),
                 ..Default::default()
             }),
-            audio: vec![AudioStream { codec: acodec.into(), ..Default::default() }],
+            audio: vec![AudioStream {
+                codec: acodec.into(),
+                ..Default::default()
+            }],
             subtitles: vec!["subrip".into()],
             ..Default::default()
         }
@@ -228,7 +248,13 @@ mod tests {
     #[test]
     fn remux_when_possible() {
         let i = info("h264", "aac");
-        let job = build(&i, Path::new("o.mp4"), &Options::default(), &Caps::default()).unwrap();
+        let job = build(
+            &i,
+            Path::new("o.mp4"),
+            &Options::default(),
+            &Caps::default(),
+        )
+        .unwrap();
         let a = &job.passes[0].args;
         assert!(a.has_pair("-c:v", "copy"));
         assert!(a.has_pair("-c:a", "copy"));
@@ -239,7 +265,10 @@ mod tests {
     #[test]
     fn reencodes_what_the_container_cannot_hold() {
         let i = info("h264", "aac");
-        let o = Options { container: Container::WebM, ..Default::default() };
+        let o = Options {
+            container: Container::WebM,
+            ..Default::default()
+        };
         let job = build(&i, Path::new("o.webm"), &o, &Caps::default()).unwrap();
         let a = &job.passes[0].args;
         assert!(a.has_pair("-c:v", "libvpx-vp9"));
@@ -251,14 +280,27 @@ mod tests {
     #[test]
     fn forced_codec_reencodes() {
         let i = info("h264", "aac");
-        let o = Options { video: Some(VideoCodec::H265), ..Default::default() };
+        let o = Options {
+            video: Some(VideoCodec::H265),
+            ..Default::default()
+        };
         let job = build(&i, Path::new("o.mp4"), &o, &Caps::default()).unwrap();
         let a = &job.passes[0].args;
         assert!(a.has_pair("-c:v", "libx265"));
         assert!(a.has_pair("-tag:v", "hvc1"));
         // A codec the container can't take falls back to its default.
-        let o = Options { container: Container::Avi, video: Some(VideoCodec::Av1), ..Default::default() };
-        let job = build(&info("vp9", "opus"), Path::new("o.avi"), &o, &Caps::default()).unwrap();
+        let o = Options {
+            container: Container::Avi,
+            video: Some(VideoCodec::Av1),
+            ..Default::default()
+        };
+        let job = build(
+            &info("vp9", "opus"),
+            Path::new("o.avi"),
+            &o,
+            &Caps::default(),
+        )
+        .unwrap();
         assert!(job.passes[0].args.has_pair("-c:v", "libx264"));
         assert!(job.passes[0].args.has_pair("-c:a", "libmp3lame"));
     }
@@ -266,22 +308,41 @@ mod tests {
     #[test]
     fn gif_uses_two_stage_palette() {
         let i = info("h264", "aac");
-        let o = GifOptions { start: 2.0, length: 4.0, width: 4000, ..Default::default() };
+        let o = GifOptions {
+            start: 2.0,
+            length: 4.0,
+            width: 4000,
+            ..Default::default()
+        };
         let job = build_gif(&i, Path::new("o.gif"), &o, &Caps::default()).unwrap();
         let a = &job.passes[0].args;
         assert!(a.has_pair("-ss", "2.000") && a.has_pair("-t", "4.000"));
-        let fc = a.strings()[a.strings().iter().position(|x| x == "-filter_complex").unwrap() + 1].clone();
+        let fc = a.strings()[a
+            .strings()
+            .iter()
+            .position(|x| x == "-filter_complex")
+            .unwrap()
+            + 1]
+        .clone();
         assert!(fc.contains("scale=1920:-2"), "never upscales: {fc}");
         assert!(fc.contains("palettegen=max_colors=256:stats_mode=diff"));
         assert!(fc.contains("dither=sierra2_4a"));
         assert_eq!(job.passes[0].duration, 4.0);
 
-        let o = GifOptions { format: AnimFormat::WebP, start: 28.0, length: 10.0, ..Default::default() };
+        let o = GifOptions {
+            format: AnimFormat::WebP,
+            start: 28.0,
+            length: 10.0,
+            ..Default::default()
+        };
         let job = build_gif(&i, Path::new("o.webp"), &o, &Caps::default()).unwrap();
         assert!(job.passes[0].args.has_pair("-c:v", "libwebp_anim"));
         assert_eq!(job.passes[0].duration, 2.0);
 
-        let o = GifOptions { start: 31.0, ..Default::default() };
+        let o = GifOptions {
+            start: 31.0,
+            ..Default::default()
+        };
         assert!(build_gif(&i, Path::new("o.gif"), &o, &Caps::default()).is_err());
     }
 }
