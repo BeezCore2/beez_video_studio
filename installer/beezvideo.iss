@@ -2,11 +2,15 @@
 ;
 ; Build (after `cargo build --release`):
 ;   ISCC.exe /DAppVersion=0.1.0 installer\beezvideo.iss
-; Output: dist\Beez-Video-Studio-Setup-v<version>.exe
+; Output: dist\Beez-Video-Studio-Setup-v<version>[-Standalone].exe
 ;
 ; Installs per user into %LOCALAPPDATA%\Programs (no administrator rights needed). This also
 ; keeps the in-app self-updater working, because the app can replace its own .exe there.
-; FFmpeg is not bundled: the app offers a one-click download on first start.
+;
+; Standalone build: put ffmpeg.exe and ffprobe.exe into installer\ffmpeg\ before compiling.
+; They are installed into {app}\ffmpeg\bin (where the app looks first), so the app works
+; offline right away, and the output is named ...-Standalone.exe. Without them, the app
+; offers a one-click FFmpeg download on first start.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -15,6 +19,13 @@
 #define AppName "Beez Video Studio"
 #define AppExe "beez_video_studio.exe"
 #define AppUrl "https://github.com/smbhathiya/beez_video_studio"
+
+#if FileExists(AddBackslash(SourcePath) + "ffmpeg\ffmpeg.exe") && FileExists(AddBackslash(SourcePath) + "ffmpeg\ffprobe.exe")
+  #define Bundled
+  #define Flavor "-Standalone"
+#else
+  #define Flavor ""
+#endif
 
 [Setup]
 ; Never change AppId: Windows uses it to recognise upgrades of the same app.
@@ -38,13 +49,14 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist
-OutputBaseFilename=Beez-Video-Studio-Setup-v{#AppVersion}
+OutputBaseFilename=Beez-Video-Studio-Setup-v{#AppVersion}{#Flavor}
 SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 WizardStyle=modern
-Compression=lzma2/max
+Compression=lzma2/ultra64
 SolidCompression=yes
+LZMAUseSeparateProcess=yes
 CloseApplications=yes
 RestartApplications=no
 
@@ -57,6 +69,11 @@ Name: "openwith"; Description: "Show {#AppName} in the ""Open with"" menu for vi
 
 [Files]
 Source: "..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
+#ifdef Bundled
+Source: "ffmpeg\ffmpeg.exe"; DestDir: "{app}\ffmpeg\bin"; Flags: ignoreversion
+Source: "ffmpeg\ffprobe.exe"; DestDir: "{app}\ffmpeg\bin"; Flags: ignoreversion
+#endif
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
@@ -79,7 +96,7 @@ Root: HKA; Subkey: "Software\Classes\.webm\OpenWithList\{#AppExe}"; ValueType: s
 Root: HKA; Subkey: "Software\Classes\.avi\OpenWithList\{#AppExe}"; ValueType: string; ValueData: ""; Flags: uninsdeletekey; Tasks: openwith
 
 [UninstallDelete]
-; The FFmpeg copy the app downloaded, and its settings and log.
+; An FFmpeg copy the app downloaded itself, and its settings and log.
 Type: filesandordirs; Name: "{localappdata}\{#AppName}"
 
 [Run]

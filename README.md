@@ -101,6 +101,8 @@ cargo run --release -- "C:\path\clip.mp4"   # open a file on startup
 
 ```sh
 cargo test                # FFmpeg command builders, probing, progress parsing, job handling…
+cargo test --release e2e -- --ignored --test-threads=1 --nocapture
+                          # every tool end-to-end against a real FFmpeg (about a minute)
 cargo clippy              # lints
 cargo fmt                 # format the code
 ```
@@ -126,13 +128,33 @@ The result is a single executable, `target\release\beez_video_studio.exe`, with 
 ## 5. Installer & icon
 
 - **Icon:** [`assets/icon.ico`](assets/icon.ico) is embedded into the `.exe` by [`build.rs`](build.rs). To redesign it, edit [`examples/make_icon.rs`](examples/make_icon.rs) and run `cargo run --example make_icon`.
-- **Installer:** [`installer/beezvideo.iss`](installer/beezvideo.iss) is an [Inno Setup](https://jrsoftware.org/isinfo.php) script. It installs per user into `%LOCALAPPDATA%\Programs\Beez Video Studio` (no administrator rights, and self-update keeps working), adds a Start menu shortcut, optionally a Desktop shortcut and **Open with** entries for MP4, MOV, MKV, WebM and AVI, and removes the downloaded FFmpeg on uninstall.
+- **Installer:** [`installer/beezvideo.iss`](installer/beezvideo.iss) is an [Inno Setup](https://jrsoftware.org/isinfo.php) script. It installs per user into `%LOCALAPPDATA%\Programs\Beez Video Studio` (no administrator rights, and self-update keeps working), adds a Start menu shortcut, optionally a Desktop shortcut and **Open with** entries for MP4, MOV, MKV, WebM and AVI, installs the user guide [`installer/README.txt`](installer/README.txt) (offered at the end of setup), and removes everything on uninstall.
+
+There are two kinds of installer, built from the same script:
+
+| Installer | Size | FFmpeg |
+|---|---|---|
+| `Beez-Video-Studio-Setup-vX.Y.Z.exe` | ~7 MB | downloaded with one click on first start |
+| `Beez-Video-Studio-Setup-vX.Y.Z-Standalone.exe` | ~100 MB | included: works offline right away |
+
+The script builds the **standalone** installer automatically when `installer\ffmpeg\` contains `ffmpeg.exe` and `ffprobe.exe` (that folder is git-ignored). They are installed into `{app}\ffmpeg\bin`, where the app looks first.
 
 ```powershell
 cargo build --release
-& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 installer\beezvideo.iss
+$iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+
+# Small installer (no installer\ffmpeg folder):
+& $iscc /DAppVersion=0.1.0 installer\beezvideo.iss
 # → dist\Beez-Video-Studio-Setup-v0.1.0.exe
+
+# Standalone installer: copy FFmpeg in first, for example the copy the app downloaded:
+New-Item -ItemType Directory -Force installer\ffmpeg
+Copy-Item "$env:LOCALAPPDATA\Beez Video Studio\ffmpeg\bin\ff*.exe" installer\ffmpeg\
+& $iscc /DAppVersion=0.1.0 installer\beezvideo.iss
+# → dist\Beez-Video-Studio-Setup-v0.1.0-Standalone.exe
 ```
+
+> **FFmpeg licence:** the bundled FFmpeg build is GPL v3. When you distribute the standalone installer, its README.txt points users to the FFmpeg source code, as the GPL requires.
 
 ---
 
@@ -142,7 +164,7 @@ Releases are built and published by GitHub Actions ([.github/workflows/release.y
 
 1. Bump `version` in `Cargo.toml` and check that `cargo test` passes.
 2. Commit, then `git tag v0.2.0` and `git push origin master --tags`. The tag **must** be `v` + the version in `Cargo.toml`.
-3. The workflow runs the tests, builds the app, zips it as `Beez-Video-Studio-v0.2.0-x86_64-pc-windows-msvc.zip`, builds the installer, and creates the GitHub Release with both files.
+3. The workflow runs the tests, builds the app, zips it as `Beez-Video-Studio-v0.2.0-x86_64-pc-windows-msvc.zip`, builds the small installer, downloads FFmpeg and builds the standalone installer, and creates the GitHub Release with all three files.
 
 ---
 

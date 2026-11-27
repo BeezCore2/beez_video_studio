@@ -59,9 +59,21 @@ jobs:
             "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
           ) | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $iscc) { throw "Inno Setup compiler not found" }
+          # Small installer: the app downloads FFmpeg on first start.
           & $iscc "/DAppVersion=$env:VERSION" installer/beezvideo.iss
           if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
           "SETUP=dist/Beez-Video-Studio-Setup-v$env:VERSION.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          # Standalone installer: FFmpeg included.
+          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-unpacked
+          New-Item -ItemType Directory -Force installer/ffmpeg | Out-Null
+          Get-ChildItem ffmpeg-unpacked -Recurse -Include ffmpeg.exe, ffprobe.exe |
+            Where-Object { $_.Directory.Name -eq "bin" } |
+            Copy-Item -Destination installer/ffmpeg
+          & $iscc "/DAppVersion=$env:VERSION" installer/beezvideo.iss
+          if ($LASTEXITCODE -ne 0) { throw "Standalone installer build failed" }
+          "SETUP_FULL=dist/Beez-Video-Studio-Setup-v$env:VERSION-Standalone.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Publish release
         shell: pwsh
@@ -71,13 +83,13 @@ jobs:
           $notes = @"
           ## Download
 
-          - **New install:** download ``Beez-Video-Studio-Setup-v$env:VERSION.exe``, run it and follow the steps. No administrator rights are needed.
+          - **New install:** download ``Beez-Video-Studio-Setup-v$env:VERSION-Standalone.exe`` (FFmpeg included, works offline) or the smaller ``Beez-Video-Studio-Setup-v$env:VERSION.exe`` (downloads FFmpeg on first start). No administrator rights are needed.
           - **Portable:** download the ``.zip``, extract it and run ``beez_video_studio.exe``.
           - **Already installed?** The app updates itself: open it and click **Update now**.
           - On first start the app offers to download FFmpeg (the video engine) with one click.
 
           "@
-          gh release create "${{ github.ref_name }}" "$env:SETUP" "$env:ZIP" `
+          gh release create "${{ github.ref_name }}" "$env:SETUP_FULL" "$env:SETUP" "$env:ZIP" `
             --title "Beez Video Studio ${{ github.ref_name }}" `
             --notes "$notes" `
             --generate-notes

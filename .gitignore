@@ -1,2 +1,4 @@
 /target
 /dist
+# FFmpeg binaries staged for the standalone installer (see README)
+/installer/ffmpeg/
