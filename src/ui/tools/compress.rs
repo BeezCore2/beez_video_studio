@@ -23,13 +23,16 @@ enum Level {
 /// Settings + files an estimate was made for.
 type EstimateKey = (Options, Vec<PathBuf>);
 
+/// Per-file results flowing back from the estimating thread.
+type EstimateRx = mpsc::Receiver<(PathBuf, Result<u64, String>)>;
+
 /// Background size estimates, redone shortly after the settings stop changing.
 #[derive(Default)]
 struct Estimator {
     key: Option<EstimateKey>,
     changed_at: Option<Instant>,
     results: HashMap<PathBuf, Result<u64, String>>,
-    running: Option<(mpsc::Receiver<(PathBuf, Result<u64, String>)>, Progress)>,
+    running: Option<(EstimateRx, Progress)>,
     /// The file being estimated right now.
     current: Option<PathBuf>,
 }
