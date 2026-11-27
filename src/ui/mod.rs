@@ -4,6 +4,7 @@
 mod media;
 mod theme;
 mod tools;
+mod update;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -13,12 +14,13 @@ use eframe::egui::{
     self, Align2, Color32, FontId, Margin, RichText, Sense, Stroke, StrokeKind, Vec2,
 };
 
+use crate::video::download;
 use crate::video::ffmpeg::{self, Caps};
 use crate::video::progress::{Progress, is_cancelled};
-use crate::video::download;
 use media::{AUDIO_EXT, Frames, has_ext, media_ext};
 use theme::*;
 use tools::*;
+use update::UpdateUi;
 
 struct Running {
     label: String,
@@ -62,6 +64,7 @@ pub struct App {
     info: InfoState,
     /// Decoded video frames, shared by all tools.
     frames: Frames,
+    update: UpdateUi,
 }
 
 fn check_engine(ctx: &egui::Context) -> Engine {
@@ -98,6 +101,7 @@ impl App {
             frames_tool: Default::default(),
             info: Default::default(),
             frames: Frames::default(),
+            update: UpdateUi::new(&cc.egui_ctx),
         };
         // Files passed on the command line (e.g. "Open with…").
         let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
@@ -174,7 +178,11 @@ impl App {
             self.frames.invalidate(f);
         }
         let all_audio = files.iter().all(|p| has_ext(p, AUDIO_EXT));
-        let tool = tool.unwrap_or(if all_audio { Tool::Audio } else { Tool::Compress });
+        let tool = tool.unwrap_or(if all_audio {
+            Tool::Audio
+        } else {
+            Tool::Compress
+        });
         self.tool = Some(tool);
         let first = files[0].clone();
         match tool {
@@ -203,7 +211,9 @@ impl App {
                 card(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("Looking for FFmpeg and testing the graphics card's video encoders…");
+                        ui.label(
+                            "Looking for FFmpeg and testing the graphics card's video encoders…",
+                        );
                     });
                 });
             }
@@ -242,7 +252,11 @@ impl App {
                         });
                     });
                 ui.add_space(4.0);
-                if locate && let Some(dir) = rfd::FileDialog::new().set_title("Folder with ffmpeg and ffprobe").pick_folder() {
+                if locate
+                    && let Some(dir) = rfd::FileDialog::new()
+                        .set_title("Folder with ffmpeg and ffprobe")
+                        .pick_folder()
+                {
                     if ffmpeg::set_dir(&dir).is_some() {
                         self.engine = check_engine(ui.ctx());
                     } else {
@@ -307,9 +321,9 @@ impl App {
         task_out
     }
 
-    fn footer(&self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            let mut text = format!("Beez Video Studio · Version {}", env!("CARGO_PKG_VERSION"));
+    fn footer(&mut self, ui: &mut egui::Ui) {
+        let mut text = String::new();
+        {
             if let Engine::Ready { version, caps } = &self.engine {
                 text.push_str(&format!(" · FFmpeg {version}"));
                 let gpus: Vec<&str> = [("nvenc", "NVIDIA"), ("qsv", "Intel"), ("amf", "AMD")]
@@ -321,8 +335,8 @@ impl App {
                     text.push_str(&format!(" · GPU encoding: {}", gpus.join(", ")));
                 }
             }
-            caption(ui, &text);
-        });
+        }
+        self.update.footer(ui, &text);
     }
 
     // ---------------------------------------------------------------------------------
@@ -339,12 +353,20 @@ impl App {
             }
             ui.add_space(4.0);
             let home = ui.add(
-                egui::Label::new(title("Home").color(Palette::current(ui).text2)).sense(Sense::click()),
+                egui::Label::new(title("Home").color(Palette::current(ui).text2))
+                    .sense(Sense::click()),
             );
-            if home.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            if home
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
                 self.tool = None;
             }
-            ui.label(RichText::new(format!("  {I_RIGHT}  ")).size(14.0).color(Palette::current(ui).text2));
+            ui.label(
+                RichText::new(format!("  {I_RIGHT}  "))
+                    .size(14.0)
+                    .color(Palette::current(ui).text2),
+            );
             ui.label(title(tool.name()));
         });
         ui.label(secondary(ui, tool.description()));
@@ -373,7 +395,7 @@ impl App {
                 Tool::Info => app.info.ui(ui, f, &caps),
             }
         };
-        let busy = self.running.is_some();
+        let busy = self.running.is_some() || self.update.busy();
         ui.add_enabled_ui(!busy, |ui| {
             egui::ScrollArea::vertical()
                 .id_salt(tool.name())
@@ -403,19 +425,36 @@ impl App {
                     ui.add_space(4.0);
                     ui.vertical(|ui| {
                         ui.spacing_mut().item_spacing.y = 2.0;
-                        let title = if cancelling { "Cancelling…".to_string() } else { format!("{}…", r.label) };
+                        let title = if cancelling {
+                            "Cancelling…".to_string()
+                        } else {
+                            format!("{}…", r.label)
+                        };
                         ui.label(strong(title));
                         let stage = pr.stage();
-                        let mut detail = if stage.is_empty() { "Starting".to_string() } else { stage };
+                        let mut detail = if stage.is_empty() {
+                            "Starting".to_string()
+                        } else {
+                            stage
+                        };
                         if let Some(f) = fraction {
                             detail = format!("{:.0}%  ·  {detail}", f * 100.0);
                         }
-                        detail.push_str(&format!("  ·  {}:{:02} elapsed", elapsed / 60, elapsed % 60));
+                        detail.push_str(&format!(
+                            "  ·  {}:{:02} elapsed",
+                            elapsed / 60,
+                            elapsed % 60
+                        ));
                         caption(ui, &detail);
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let btn = egui::Button::new(labeled(I_CLOSE, "Cancel")).min_size(Vec2::new(100.0, 32.0));
-                        if ui.add_enabled(!cancelling, btn).on_hover_text("Stop now. Nothing is saved.").clicked() {
+                        let btn = egui::Button::new(labeled(I_CLOSE, "Cancel"))
+                            .min_size(Vec2::new(100.0, 32.0));
+                        if ui
+                            .add_enabled(!cancelling, btn)
+                            .on_hover_text("Stop now. Nothing is saved.")
+                            .clicked()
+                        {
                             pr.cancel();
                         }
                     });
@@ -427,7 +466,8 @@ impl App {
                 };
                 ui.add(bar.desired_height(6.0).fill(p.accent).corner_radius(3.0));
             });
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
             return;
         }
         let Some((outcome, msg)) = self.status.clone() else {
@@ -465,7 +505,11 @@ impl App {
                             if out.is_file() && ui.button(labeled(I_PLAY, "Open")).clicked() {
                                 let _ = open_path(&out);
                             }
-                            let dir = if out.is_dir() { Some(out.clone()) } else { out.parent().map(Path::to_path_buf) };
+                            let dir = if out.is_dir() {
+                                Some(out.clone())
+                            } else {
+                                out.parent().map(Path::to_path_buf)
+                            };
                             if let Some(dir) = dir
                                 && ui.button(labeled(I_FOLDER, "Show in folder")).clicked()
                             {
@@ -483,9 +527,17 @@ impl App {
 
 fn theme_toggle(ui: &mut egui::Ui) {
     let dark = ui.visuals().dark_mode;
-    let (icon, tip) = if dark { (I_SUN, "Switch to light mode") } else { (I_MOON, "Switch to dark mode") };
+    let (icon, tip) = if dark {
+        (I_SUN, "Switch to light mode")
+    } else {
+        (I_MOON, "Switch to dark mode")
+    };
     if icon_button(ui, true, icon, tip) {
-        ui.ctx().set_theme(if dark { egui::Theme::Light } else { egui::Theme::Dark });
+        ui.ctx().set_theme(if dark {
+            egui::Theme::Light
+        } else {
+            egui::Theme::Dark
+        });
     }
 }
 
@@ -499,17 +551,45 @@ fn tool_card(ui: &mut egui::Ui, tool: Tool, width: f32) -> bool {
     painter.rect_stroke(rect, 8.0, Stroke::new(1.0, p.border), StrokeKind::Inside);
 
     let icon_box = egui::Rect::from_min_size(rect.min + Vec2::new(16.0, 16.0), Vec2::splat(40.0));
-    painter.rect_filled(icon_box, 6.0, p.accent.gamma_multiply(if p.dark { 0.18 } else { 0.12 }));
-    painter.text(icon_box.center(), Align2::CENTER_CENTER, tool.icon(), FontId::proportional(20.0), p.accent);
+    painter.rect_filled(
+        icon_box,
+        6.0,
+        p.accent.gamma_multiply(if p.dark { 0.18 } else { 0.12 }),
+    );
+    painter.text(
+        icon_box.center(),
+        Align2::CENTER_CENTER,
+        tool.icon(),
+        FontId::proportional(20.0),
+        p.accent,
+    );
 
     let x = icon_box.right() + 14.0;
-    painter.text(egui::pos2(x, rect.top() + 16.0), Align2::LEFT_TOP, tool.name(), FontId::new(15.0, semibold()), p.text);
-    let desc = painter.layout(tool.description().to_string(), FontId::proportional(12.0), p.text2, rect.right() - x - 16.0);
+    painter.text(
+        egui::pos2(x, rect.top() + 16.0),
+        Align2::LEFT_TOP,
+        tool.name(),
+        FontId::new(15.0, semibold()),
+        p.text,
+    );
+    let desc = painter.layout(
+        tool.description().to_string(),
+        FontId::proportional(12.0),
+        p.text2,
+        rect.right() - x - 16.0,
+    );
     painter.galley(egui::pos2(x, rect.top() + 40.0), desc, p.text2);
     if hovered {
-        painter.text(rect.right_top() + Vec2::new(-14.0, 18.0), Align2::RIGHT_TOP, I_RIGHT, FontId::proportional(11.0), p.text2);
+        painter.text(
+            rect.right_top() + Vec2::new(-14.0, 18.0),
+            Align2::RIGHT_TOP,
+            I_RIGHT,
+            FontId::proportional(11.0),
+            p.text2,
+        );
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
 }
 
 fn open_path(p: &Path) -> std::io::Result<()> {
@@ -519,7 +599,10 @@ fn open_path(p: &Path) -> std::io::Result<()> {
     let program = "open";
     #[cfg(all(unix, not(target_os = "macos")))]
     let program = "xdg-open";
-    std::process::Command::new(program).arg(p).spawn().map(|_| ())
+    std::process::Command::new(program)
+        .arg(p)
+        .spawn()
+        .map(|_| ())
 }
 
 /// Open the folder with the file selected (Windows), or just the folder elsewhere.
@@ -541,6 +624,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll(&ctx);
+        self.update.poll();
         self.frames.poll(&ctx);
 
         let dropped: Vec<PathBuf> = ctx.input(|i| {
@@ -558,18 +642,33 @@ impl eframe::App for App {
         let bg = Palette::current(ui).bg;
         if self.tool.is_none() {
             egui::Panel::bottom("home_footer")
-                .frame(egui::Frame::new().fill(bg).inner_margin(Margin { left: 40, right: 40, top: 6, bottom: 10 }))
+                .frame(egui::Frame::new().fill(bg).inner_margin(Margin {
+                    left: 40,
+                    right: 40,
+                    top: 6,
+                    bottom: 10,
+                }))
                 .show(ui, |ui| self.footer(ui));
         }
         if self.running.is_some() || self.status.is_some() {
             egui::Panel::bottom("infobar")
-                .frame(egui::Frame::new().fill(bg).inner_margin(Margin { left: 40, right: 40, top: 8, bottom: 16 }))
+                .frame(egui::Frame::new().fill(bg).inner_margin(Margin {
+                    left: 40,
+                    right: 40,
+                    top: 8,
+                    bottom: 16,
+                }))
                 .show(ui, |ui| self.info_bar(ui));
         }
 
         let mut action = None;
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(bg).inner_margin(Margin { left: 40, right: 40, top: 28, bottom: 16 }))
+            .frame(egui::Frame::new().fill(bg).inner_margin(Margin {
+                left: 40,
+                right: 40,
+                top: 28,
+                bottom: 16,
+            }))
             .show(ui, |ui| match self.tool {
                 None => {
                     action = egui::ScrollArea::vertical()
@@ -585,7 +684,10 @@ impl eframe::App for App {
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             let p = Palette::current(ui);
             let rect = ctx.content_rect();
-            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("drop")));
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::unique("drop"),
+            ));
             painter.rect_filled(rect, 0.0, Color32::from_black_alpha(150));
             let target = self.tool.map(Tool::name).unwrap_or("Video Studio");
             painter.text(
@@ -599,10 +701,12 @@ impl eframe::App for App {
 
         if self.tool.is_some()
             && self.running.is_none()
+            && !self.update.dialog_open()
             && ctx.input(|i| i.key_pressed(egui::Key::Escape))
         {
             self.tool = None;
         }
+        self.update.dialog(&ctx);
 
         if let Some(t) = action {
             self.start(&ctx, t);
