@@ -23,9 +23,10 @@ use super::codec::{
     self, Args, Backend, Container, Rate, Speed, VideoCodec, fit_short_side, keep_ten_bit,
     merge_x265_params,
 };
-use super::ffmpeg::Caps;
+use super::ffmpeg::{self, Caps, Span};
 use super::job::{Job, Output, Pass, temp_prefix};
 use super::probe::{MediaInfo, fmt_bitrate};
+use super::progress::Progress;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
@@ -220,6 +221,101 @@ pub fn plan(info: &MediaInfo, opts: &Options, audio_bps: u64) -> Result<Plan> {
     Ok(Plan { video_bps, size })
 }
 
+/// Video arguments (`-map`, filters, codec settings) and the encoder name.
+fn video_args(
+    info: &MediaInfo,
+    opts: &Options,
+    caps: &Caps,
+    rate: Rate,
+    video_bps: Option<u64>,
+) -> (Args, String) {
+    let codec = opts.codec;
+    let backend = codec.resolve(opts.backend, caps);
+    let filters = video_filters(info, opts, codec, video_bps);
+    let mut video = Args::new();
+    video.pair("-map", "0:v:0");
+    if !filters.is_empty() {
+        video.pair("-vf", filters.join(","));
+    }
+    video.extend(codec.args(backend, rate, opts.speed, keep_ten_bit(info, codec)));
+    (video, codec.encoder(backend).unwrap_or_default())
+}
+
+// ---------------------------------------------------------------------------------------
+// Size estimate
+// ---------------------------------------------------------------------------------------
+
+/// Segments encoded to estimate the size, as (start, length) in seconds: the whole video
+/// when it is short, otherwise 3-second samples spread evenly over it (4, or 6 for videos
+/// over 10 minutes), so busy and calm scenes are both measured.
+pub fn sample_points(duration: f64) -> Vec<(f64, f64)> {
+    if duration <= 15.0 {
+        return vec![(0.0, duration.max(0.1))];
+    }
+    let k = if duration > 600.0 { 6 } else { 4 };
+    let len = 3.0;
+    (0..k)
+        .map(|i| {
+            let centre = duration * (i as f64 + 0.5) / k as f64;
+            let start = (centre - len / 2.0).max(0.0);
+            (start, len.min(duration - start))
+        })
+        .collect()
+}
+
+/// Expected file size: the sampled video bytes per second over the whole duration, plus the
+/// audio, plus 1 % container overhead.
+pub fn extrapolate(duration: f64, sampled_bytes: u64, sampled_secs: f64, audio_bps: u64) -> u64 {
+    let video = sampled_bytes as f64 / sampled_secs.max(0.01) * duration;
+    let audio = audio_bps as f64 / 8.0 * duration;
+    ((video + audio) * 1.01) as u64
+}
+
+/// Estimated output size in bytes. A target size is returned as is; a quality level is
+/// measured by encoding [`sample_points`] with the exact settings.
+pub fn estimate(info: &MediaInfo, opts: &Options, caps: &Caps, progress: &Progress) -> Result<u64> {
+    if info.video.is_none() {
+        bail!("No video");
+    }
+    let (_, audio_bps) = audio_args(info, opts.audio, container(opts.codec));
+    plan(info, opts, audio_bps)?;
+    let crf = match opts.mode {
+        Mode::TargetSize(mb) => return Ok((mb * 1024.0 * 1024.0) as u64),
+        Mode::Quality(crf) => crf,
+    };
+    if info.duration <= 0.0 {
+        bail!("The video's length is unknown");
+    }
+    let (video, _) = video_args(info, opts, caps, Rate::Quality(crf), None);
+    let points = sample_points(info.duration);
+    let n = points.len();
+    let (mut bytes, mut secs) = (0u64, 0.0f64);
+    for (i, (start, len)) in points.into_iter().enumerate() {
+        let out = temp_prefix("estimate").with_extension("mkv");
+        let mut a = Args::new();
+        a.pair("-ss", format!("{start:.3}"))
+            .pair("-t", format!("{len:.3}"));
+        a.push("-i").push(&info.path);
+        a.extend(video.clone());
+        merge_x265_params(&mut a);
+        a.push("-an").push("-sn").pair("-f", "matroska").push(&out);
+        let span = Span {
+            progress,
+            from: i as f32 / n as f32,
+            to: (i + 1) as f32 / n as f32,
+            duration: len,
+            stage: "Estimating size",
+        };
+        let result = ffmpeg::run(&a.0, span);
+        let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+        let _ = std::fs::remove_file(&out);
+        result?;
+        bytes += size;
+        secs += len;
+    }
+    Ok(extrapolate(info.duration, bytes, secs, audio_bps))
+}
+
 /// Build the compression job.
 pub fn build(info: &MediaInfo, out: &Path, opts: &Options, caps: &Caps) -> Result<Job> {
     if info.video.is_none() {
@@ -228,7 +324,6 @@ pub fn build(info: &MediaInfo, out: &Path, opts: &Options, caps: &Caps) -> Resul
     let codec = opts.codec;
     let backend = codec.resolve(opts.backend, caps);
     let container = container(codec);
-    let ten_bit = keep_ten_bit(info, codec);
     let (audio, audio_bps) = audio_args(info, opts.audio, container);
 
     let plan = plan(info, opts, audio_bps)?;
@@ -240,15 +335,7 @@ pub fn build(info: &MediaInfo, out: &Path, opts: &Options, caps: &Caps) -> Resul
         },
     };
 
-    let filters = video_filters(info, opts, codec, video_bps);
-    let mut video = Args::new();
-    video.pair("-map", "0:v:0");
-    if !filters.is_empty() {
-        video.pair("-vf", filters.join(","));
-    }
-    video.extend(codec.args(backend, rate, opts.speed, ten_bit));
-
-    let encoder = codec.encoder(backend).unwrap_or_default();
+    let (video, encoder) = video_args(info, opts, caps, rate, video_bps);
     let mut job = Job::new(Output::File(out.to_path_buf()), "Compressed");
     job.source_size = Some(info.size);
 
@@ -428,6 +515,27 @@ mod tests {
             );
         }
         assert!(job.passes[1].args.has_pair("-tag:v", "hvc1"));
+    }
+
+    #[test]
+    fn size_estimate_sampling() {
+        assert_eq!(sample_points(10.0), [(0.0, 10.0)]);
+        let p = sample_points(100.0);
+        assert_eq!(p.len(), 4);
+        assert_eq!(p[0], (11.0, 3.0));
+        assert_eq!(p[3], (86.0, 3.0));
+        assert_eq!(sample_points(1200.0).len(), 6);
+        // 12 s sampled at 1 MB → 100 s video ≈ 8.33 MB, plus 128 kbps audio (1.6 MB), +1 %.
+        let est = extrapolate(100.0, 1_000_000, 12.0, 128_000);
+        assert_eq!(est, 10_032_666);
+        // Target size needs no sampling.
+        let info = sample();
+        let o = Options {
+            mode: Mode::TargetSize(10.0),
+            ..Default::default()
+        };
+        let size = estimate(&info, &o, &caps(), &Progress::default()).unwrap();
+        assert_eq!(size, 10 * 1024 * 1024);
     }
 
     #[test]
