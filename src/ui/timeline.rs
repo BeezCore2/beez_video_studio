@@ -34,7 +34,7 @@ fn time_edit(ui: &mut egui::Ui, salt: &str, value: f64, buf: &mut String) -> Opt
     let r = ui.add(
         egui::TextEdit::singleline(buf)
             .id(id)
-            .desired_width(84.0)
+            .desired_width(96.0)
             .font(egui::TextStyle::Monospace),
     );
     if r.lost_focus() {
@@ -56,8 +56,31 @@ const GUTTER: f32 = 56.0;
 const RULER: f32 = 22.0;
 const VIDEO: f32 = 58.0;
 const AUDIO: f32 = 38.0;
-pub fn playhead_color() -> Color32 {
-    Color32::from_rgb(0xFF, 0x5C, 0x5C)
+
+/// A ruler label: `0:10` for whole-second steps, `0:00.5` / `0:02.25` for fine steps
+/// (only as many decimals as the step needs).
+pub fn ruler_label(t: f64, step: f64) -> String {
+    let prec = if step >= 1.0 {
+        0
+    } else if ((step * 10.0) - (step * 10.0).round()).abs() < 1e-9 {
+        1
+    } else {
+        2
+    };
+    let scale = 10f64.powi(prec as i32);
+    let units = (t.max(0.0) * scale).round() as u64;
+    let whole = units / scale as u64;
+    let frac = units % scale as u64;
+    let (h, m, s) = (whole / 3600, whole / 60 % 60, whole % 60);
+    let mut out = if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    };
+    if prec > 0 {
+        out.push_str(&format!(".{frac:0prec$}"));
+    }
+    out
 }
 
 /// Tick spacing (seconds) so labels are at least `min_px` apart.
@@ -160,11 +183,7 @@ impl Timeline {
         let t_of = |x: f32| ((x - area.left()) / area.width()).clamp(0.0, 1.0) as f64 * dur;
 
         // Track labels.
-        let track_bg = if p.dark {
-            Color32::from_gray(30)
-        } else {
-            Color32::from_gray(228)
-        };
+        let track_bg = p.card;
         for (r, icon, name) in [(vtrack, I_VIDEO, "V1"), (atrack, I_AUDIO, "A1")] {
             let label = Rect::from_min_max(
                 pos2(full.left(), r.top()),
@@ -208,7 +227,7 @@ impl Timeline {
                 painter.text(
                     pos2(x + 3.0, ruler.top() + 2.0),
                     Align2::LEFT_TOP,
-                    fmt_time(t, step < 1.0),
+                    ruler_label(t, step),
                     FontId::proportional(10.0),
                     p.text2,
                 );
@@ -257,15 +276,7 @@ impl Timeline {
         }
 
         // Audio track: waveform.
-        painter.rect_filled(
-            atrack,
-            3.0,
-            if p.dark {
-                Color32::from_rgb(0x14, 0x22, 0x1A)
-            } else {
-                Color32::from_rgb(0xDD, 0xEE, 0xE3)
-            },
-        );
+        painter.rect_filled(atrack, 3.0, p.well);
         if info.has_audio() {
             if let Some(tex) = waves.get(ui.ctx(), &info.path) {
                 painter.image(
@@ -341,7 +352,7 @@ impl Timeline {
 
         // Playhead.
         let xp = x_of(clip.playhead);
-        let ph = playhead_color();
+        let ph = p.playhead;
         painter.line_segment(
             [pos2(xp, ruler.top()), pos2(xp, atrack.bottom())],
             Stroke::new(2.0, ph),
@@ -397,6 +408,12 @@ mod tests {
 
     #[test]
     fn ticks() {
+        // Ruler labels: whole seconds without milliseconds; tenths only for fine steps.
+        assert_eq!(ruler_label(10.0, 5.0), "0:10");
+        assert_eq!(ruler_label(65.0, 15.0), "1:05");
+        assert_eq!(ruler_label(0.5, 0.5), "0:00.5");
+        assert_eq!(ruler_label(2.25, 0.25), "0:02.25");
+        assert_eq!(ruler_label(3725.0, 300.0), "1:02:05");
         // 60 s over 800 px: 13.3 px per second → 10 s ticks (133 px).
         assert_eq!(tick_step(60.0, 800.0, 80.0), 10.0);
         assert_eq!(tick_step(5.0, 1000.0, 80.0), 0.5);

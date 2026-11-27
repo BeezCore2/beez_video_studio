@@ -101,14 +101,21 @@ pub fn install_fonts(ctx: &egui::Context) {
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub dark: bool,
-    pub bg: Color32,
+    /// Side panels, top bar, timeline, status bar.
+    pub panel: Color32,
+    /// The deep area around the viewer.
+    pub well: Color32,
+    /// Raised surfaces: cards, inputs, unselected controls.
     pub card: Color32,
     pub card_hover: Color32,
     pub border: Color32,
     pub text: Color32,
     pub text2: Color32,
+    /// Honey: actions, selection, the In–Out range.
     pub accent: Color32,
     pub on_accent: Color32,
+    /// The playhead (cream, distinct from the honey range).
+    pub playhead: Color32,
     pub success: Color32,
     pub error: Color32,
 }
@@ -118,30 +125,34 @@ impl Palette {
         if dark {
             Self {
                 dark,
-                bg: Color32::from_rgb(0x20, 0x20, 0x20),
-                card: Color32::from_rgb(0x2B, 0x2B, 0x2B),
-                card_hover: Color32::from_rgb(0x32, 0x32, 0x32),
-                border: Color32::from_rgb(0x1C, 0x1C, 0x1C),
-                text: Color32::from_rgb(0xFF, 0xFF, 0xFF),
-                text2: Color32::from_rgb(0xC5, 0xC5, 0xC5),
-                accent: Color32::from_rgb(0x4A, 0xD6, 0x8C),
-                on_accent: Color32::BLACK,
-                success: Color32::from_rgb(0x6C, 0xCB, 0x5F),
-                error: Color32::from_rgb(0xFF, 0x99, 0xA4),
+                panel: Color32::from_rgb(0x1C, 0x1B, 0x19),
+                well: Color32::from_rgb(0x12, 0x11, 0x10),
+                card: Color32::from_rgb(0x27, 0x25, 0x22),
+                card_hover: Color32::from_rgb(0x30, 0x2D, 0x29),
+                border: Color32::from_rgb(0x36, 0x32, 0x2D),
+                text: Color32::from_rgb(0xED, 0xE9, 0xE3),
+                text2: Color32::from_rgb(0xA6, 0x9F, 0x96),
+                accent: Color32::from_rgb(0xF2, 0xA9, 0x3B),
+                on_accent: Color32::from_rgb(0x22, 0x16, 0x05),
+                playhead: Color32::from_rgb(0xFF, 0xF3, 0xDC),
+                success: Color32::from_rgb(0x5F, 0xCB, 0x8A),
+                error: Color32::from_rgb(0xF2, 0x84, 0x7C),
             }
         } else {
             Self {
                 dark,
-                bg: Color32::from_rgb(0xF3, 0xF3, 0xF3),
-                card: Color32::from_rgb(0xFB, 0xFB, 0xFB),
-                card_hover: Color32::from_rgb(0xF6, 0xF6, 0xF6),
-                border: Color32::from_rgb(0xE5, 0xE5, 0xE5),
-                text: Color32::from_rgb(0x1A, 0x1A, 0x1A),
-                text2: Color32::from_rgb(0x5D, 0x5D, 0x5D),
-                accent: Color32::from_rgb(0x0E, 0x8A, 0x4B),
+                panel: Color32::from_rgb(0xF4, 0xF3, 0xF0),
+                well: Color32::from_rgb(0xDC, 0xD9, 0xD4),
+                card: Color32::WHITE,
+                card_hover: Color32::from_rgb(0xFA, 0xF8, 0xF4),
+                border: Color32::from_rgb(0xD8, 0xD4, 0xCD),
+                text: Color32::from_rgb(0x1D, 0x1B, 0x18),
+                text2: Color32::from_rgb(0x5F, 0x59, 0x51),
+                accent: Color32::from_rgb(0xA8, 0x64, 0x00),
                 on_accent: Color32::WHITE,
-                success: Color32::from_rgb(0x0F, 0x7B, 0x0F),
-                error: Color32::from_rgb(0xC4, 0x2B, 0x1C),
+                playhead: Color32::from_rgb(0x1D, 0x1B, 0x18),
+                success: Color32::from_rgb(0x1B, 0x7F, 0x46),
+                error: Color32::from_rgb(0xB4, 0x2A, 0x1E),
             }
         }
     }
@@ -183,54 +194,32 @@ fn visuals(dark: bool) -> egui::Visuals {
     };
     let r4 = CornerRadius::same(4);
 
-    v.panel_fill = p.bg;
+    v.panel_fill = p.panel;
     v.window_fill = p.card;
     v.window_stroke = Stroke::new(1.0, p.border);
     v.window_corner_radius = CornerRadius::same(8);
-    v.faint_bg_color = if dark {
-        Color32::from_rgb(0x27, 0x27, 0x27)
-    } else {
-        Color32::from_rgb(0xF7, 0xF7, 0xF7)
-    };
+    v.faint_bg_color = p.card;
+    // Text fields and other "wells".
     v.extreme_bg_color = if dark {
-        Color32::from_rgb(0x1F, 0x1F, 0x1F)
+        Color32::from_rgb(0x14, 0x13, 0x11)
     } else {
         Color32::WHITE
     };
     v.hyperlink_color = p.accent;
-    v.selection.bg_fill = p.accent.gamma_multiply(if dark { 0.45 } else { 0.25 });
-    v.selection.stroke = Stroke::new(1.0, p.accent);
+    v.selection.bg_fill = p.accent.gamma_multiply(if dark { 0.35 } else { 0.22 });
+    v.selection.stroke = Stroke::new(1.0, p.text);
 
-    let control = if dark {
-        Color32::from_rgb(0x2D, 0x2D, 0x2D)
-    } else {
-        Color32::from_rgb(0xFB, 0xFB, 0xFB)
-    };
-    let control_hover = if dark {
-        Color32::from_rgb(0x33, 0x33, 0x33)
-    } else {
-        Color32::from_rgb(0xF5, 0xF5, 0xF5)
-    };
+    let control = p.card;
+    let control_hover = p.card_hover;
     let control_press = if dark {
-        Color32::from_rgb(0x28, 0x28, 0x28)
+        Color32::from_rgb(0x22, 0x20, 0x1D)
     } else {
-        Color32::from_rgb(0xF0, 0xF0, 0xF0)
+        Color32::from_rgb(0xF0, 0xEE, 0xEA)
     };
-    let stroke = if dark {
-        Color32::from_rgb(0x3A, 0x3A, 0x3A)
-    } else {
-        Color32::from_rgb(0xD9, 0xD9, 0xD9)
-    };
+    let stroke = p.border;
 
     let w = &mut v.widgets;
-    w.noninteractive.bg_stroke = Stroke::new(
-        1.0,
-        if dark {
-            Color32::from_rgb(0x33, 0x33, 0x33)
-        } else {
-            p.border
-        },
-    );
+    w.noninteractive.bg_stroke = Stroke::new(1.0, p.border);
     w.noninteractive.fg_stroke = Stroke::new(1.0, p.text);
     w.noninteractive.corner_radius = r4;
     for (wv, bg) in [
@@ -434,8 +423,8 @@ pub fn field<R>(
 
 /// A small uppercase group heading inside a side panel.
 pub fn group(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(6.0);
-    ui.label(secondary(ui, text.to_uppercase()).size(11.0).strong());
+    ui.add_space(8.0);
+    ui.label(strong(text).size(13.5).color(Palette::current(ui).text2));
     ui.add_space(2.0);
 }
 
@@ -455,12 +444,25 @@ pub fn action_button(ui: &mut egui::Ui, enabled: bool, text: &str) -> bool {
     ui.add_enabled(enabled, btn).clicked()
 }
 
-/// Background of the editor's panels (slightly different from the window background).
+/// Background of the editor's panels.
 pub fn panel_fill(ui: &egui::Ui) -> Color32 {
+    Palette::current(ui).panel
+}
+
+/// A framed choice button: honey fill with dark text when selected, a normal framed
+/// control otherwise (so every option visibly reads as clickable).
+pub fn toggle(ui: &mut egui::Ui, selected: bool, text: &str, width: f32) -> bool {
     let p = Palette::current(ui);
-    if p.dark {
-        Color32::from_rgb(0x1B, 0x1B, 0x1D)
+    let label = if selected {
+        strong(text).color(p.on_accent)
     } else {
-        Color32::from_rgb(0xEE, 0xEE, 0xF0)
+        RichText::new(text).color(p.text)
+    };
+    let mut btn = egui::Button::new(label)
+        .corner_radius(4.0)
+        .min_size(Vec2::new(width, 30.0));
+    if selected {
+        btn = btn.fill(p.accent).stroke(Stroke::NONE);
     }
+    ui.add(btn).clicked()
 }

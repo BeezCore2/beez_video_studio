@@ -300,7 +300,7 @@ impl CompressState {
                     parts.push(format!("resized to {w}×{h}"));
                 }
                 if !parts.is_empty() {
-                    hint(ui, I_INFO, &parts.join(" · "));
+                    hint(ui, I_INFO, &parts.join(", "));
                 }
             }
             Err(e) => error_note(ui, &e.to_string()),

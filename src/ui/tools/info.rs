@@ -9,6 +9,16 @@ use crate::video::probe::{fmt_bitrate, fmt_fps};
 #[derive(Default)]
 pub struct InfoState;
 
+/// A metadata tag key as a label: `creation_time` → `Creation time`.
+fn tag_label(key: &str) -> String {
+    let words = key.replace('_', " ").to_lowercase();
+    let mut c = words.chars();
+    match c.next() {
+        Some(first) => first.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
+}
+
 /// Rows of (label, value) grouped in sections.
 fn report(i: &MediaInfo) -> Vec<(String, Vec<(String, String)>)> {
     let mut out = Vec::new();
@@ -29,7 +39,7 @@ fn report(i: &MediaInfo) -> Vec<(String, Vec<(String, String)>)> {
             k.to_lowercase().as_str(),
             "title" | "artist" | "album" | "creation_time" | "encoder" | "comment" | "date"
         ) {
-            general.push((k.replace('_', " "), v.clone()));
+            general.push((tag_label(k), v.clone()));
         }
     }
     out.push(("General".to_string(), general));
@@ -153,5 +163,17 @@ impl InfoState {
             ui.ctx().copy_text(text);
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tag_labels_read_like_words() {
+        assert_eq!(tag_label("encoder"), "Encoder");
+        assert_eq!(tag_label("creation_time"), "Creation time");
+        assert_eq!(tag_label("TITLE"), "Title");
     }
 }

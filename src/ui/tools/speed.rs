@@ -23,13 +23,7 @@ impl SpeedState {
             ui.horizontal(|ui| {
                 for &f in row {
                     let selected = (o.factor - f).abs() < 1e-6;
-                    if ui
-                        .add(
-                            egui::Button::selectable(selected, format!("{f}×"))
-                                .min_size(egui::Vec2::new(w, 30.0)),
-                        )
-                        .clicked()
-                    {
+                    if toggle(ui, selected, &format!("{f}×"), w) {
                         o.factor = f;
                     }
                 }

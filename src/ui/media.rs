@@ -305,7 +305,7 @@ impl Waves {
             self.slots.insert(path.to_path_buf(), Slot::Loading);
             let (tx, path_buf, ctx) = (self.tx.clone(), path.to_path_buf(), ctx.clone());
             std::thread::spawn(move || {
-                let img = ffmpeg::waveform(&path_buf, 2400, 120, "0x4AD68C")
+                let img = ffmpeg::waveform(&path_buf, 2400, 120, "0xB9AA92")
                     .ok()
                     .and_then(|png| image::load_from_memory(&png).ok())
                     .map(|img| {

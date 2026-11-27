@@ -28,7 +28,7 @@ The app is laid out like a video editing studio, in one window:
 
 Keyboard: **Space** play/pause · **I** / **O** set In / Out · **← / →** previous / next frame · **Home** / **End** jump to In / Out.
 
-The look follows Windows 11 (Segoe UI, Fluent icons) with a green accent; it starts in dark mode and the sun/moon button switches to light mode.
+The look follows Windows 11 (Segoe UI, Fluent icons) on warm graphite, with a honey accent taken from the Beez honeycomb badge. Honey marks actions, selections and the timeline range; the playhead is cream. It starts in dark mode, and the sun/moon button switches to light mode.
 
 | Group | Tool | What it does |
 |---|---|---|

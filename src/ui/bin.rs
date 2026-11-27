@@ -226,9 +226,9 @@ impl Bin {
                         (Some(i), _) => match &i.video {
                             Some(v) => {
                                 let (w, h) = v.display_size();
-                                format!("{} · {w}×{h}", fmt_time(i.duration, false))
+                                format!("{}     {w}×{h}", fmt_time(i.duration, false))
                             }
-                            None => format!("{} · audio", fmt_time(i.duration, false)),
+                            None => format!("{}     Audio", fmt_time(i.duration, false)),
                         },
                         (None, None) => "Reading…".into(),
                     };

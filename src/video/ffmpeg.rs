@@ -136,6 +136,27 @@ pub fn command(program: &Path) -> Command {
     cmd
 }
 
+/// A short, readable FFmpeg version: `7.1`, or `nightly 2026-11-26` for builds from
+/// the development branch (`N-129308-g17de9f8597-20261126`), or the date of dated builds.
+pub fn friendly_version(v: &str) -> String {
+    if let Some(rest) = v.strip_prefix("N-")
+        && let Some(date) = rest.rsplit('-').next()
+        && date.len() == 8
+        && date.chars().all(|c| c.is_ascii_digit())
+    {
+        return format!("nightly {}-{}-{}", &date[..4], &date[4..6], &date[6..]);
+    }
+    let b = v.as_bytes();
+    if b.len() >= 10 && b[4] == b'-' && b[7] == b'-' && b[..4].iter().all(u8::is_ascii_digit) {
+        return v[..10].to_string();
+    }
+    let v = v
+        .strip_prefix('n')
+        .filter(|r| r.starts_with(|c: char| c.is_ascii_digit()))
+        .unwrap_or(v);
+    v.split('-').next().unwrap_or(v).to_string()
+}
+
 /// First line of `ffmpeg -version`, e.g. "ffmpeg version 7.1 Copyright …".
 pub fn version(t: &Tools) -> Option<String> {
     let out = command(&t.ffmpeg).arg("-version").output().ok()?;
@@ -516,6 +537,16 @@ mod tests {
 
     #[test]
     fn eta_format() {
+        assert_eq!(
+            friendly_version("N-129308-g17de9f8597-20261126"),
+            "nightly 2026-11-26"
+        );
+        assert_eq!(friendly_version("7.1"), "7.1");
+        assert_eq!(friendly_version("n7.1-12-gabcdef"), "7.1");
+        assert_eq!(
+            friendly_version("2025-03-01-git-abc-full_build-www.gyan.dev"),
+            "2025-03-01"
+        );
         assert_eq!(format_eta(5.4), "0:05");
         assert_eq!(format_eta(125.0), "2:05");
         assert_eq!(format_eta(3725.0), "1:02:05");

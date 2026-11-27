@@ -105,17 +105,12 @@ impl TransformState {
         field(ui, "Flip", "", |ui| {
             ui.horizontal(|ui| {
                 let w = (ui.available_width() - 8.0) / 2.0;
-                ui.add(
-                    egui::Button::selectable(o.flip_h, "Mirror").min_size(egui::Vec2::new(w, 30.0)),
-                )
-                .clicked()
-                .then(|| o.flip_h = !o.flip_h);
-                ui.add(
-                    egui::Button::selectable(o.flip_v, "Upside down")
-                        .min_size(egui::Vec2::new(w, 30.0)),
-                )
-                .clicked()
-                .then(|| o.flip_v = !o.flip_v);
+                if toggle(ui, o.flip_h, "Mirror", w) {
+                    o.flip_h = !o.flip_h;
+                }
+                if toggle(ui, o.flip_v, "Upside down", w) {
+                    o.flip_v = !o.flip_v;
+                }
             });
         });
 

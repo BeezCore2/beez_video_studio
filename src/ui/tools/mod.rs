@@ -295,8 +295,7 @@ pub fn segmented<T: PartialEq + Copy>(
     for row in items.chunks(per_row) {
         ui.horizontal(|ui| {
             for (v, l) in row {
-                let btn = egui::Button::selectable(*value == *v, *l).min_size(Vec2::new(w, 30.0));
-                if ui.add(btn).clicked() && *value != *v {
+                if toggle(ui, *value == *v, l, w) && *value != *v {
                     *value = *v;
                     changed = true;
                 }
@@ -306,7 +305,8 @@ pub fn segmented<T: PartialEq + Copy>(
     changed
 }
 
-/// A vertical list of two-line choices (title + description).
+/// A vertical list of two-line choices (title + description). The selected row gets a
+/// honey tint and a honey bar on its left edge; the others are plain framed rows.
 pub fn choice_list<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
     value: &mut T,
@@ -316,23 +316,62 @@ pub fn choice_list<T: PartialEq + Copy>(
     let p = Palette::current(ui);
     for (v, name, desc) in items {
         let selected = *value == *v;
-        let mut job = egui::text::LayoutJob::default();
-        job.append(
-            name,
-            0.0,
-            egui::TextFormat::simple(egui::FontId::new(13.5, semibold()), p.text),
+        let (rect, resp) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 44.0), egui::Sense::click());
+        let painter = ui.painter();
+        let fill = if selected {
+            p.accent.gamma_multiply(if p.dark { 0.16 } else { 0.12 })
+        } else if resp.hovered() {
+            p.card_hover
+        } else {
+            p.card
+        };
+        let stroke = if selected {
+            p.accent.gamma_multiply(0.7)
+        } else {
+            p.border
+        };
+        painter.rect_filled(rect, 5.0, fill);
+        painter.rect_stroke(
+            rect,
+            5.0,
+            egui::Stroke::new(1.0, stroke),
+            egui::StrokeKind::Inside,
         );
-        job.append(
-            &format!("\n{desc}"),
-            0.0,
-            egui::TextFormat::simple(egui::FontId::proportional(11.5), p.text2),
+        if selected {
+            painter.rect_filled(
+                egui::Rect::from_min_size(
+                    rect.min + Vec2::new(0.0, 8.0),
+                    Vec2::new(3.0, rect.height() - 16.0),
+                ),
+                2.0,
+                p.accent,
+            );
+        }
+        let x = rect.left() + 14.0;
+        painter.text(
+            egui::pos2(x, rect.top() + 7.0),
+            egui::Align2::LEFT_TOP,
+            *name,
+            egui::FontId::new(13.5, semibold()),
+            p.text,
         );
-        let btn =
-            egui::Button::selectable(selected, job).min_size(Vec2::new(ui.available_width(), 40.0));
-        if ui.add(btn).clicked() && !selected {
+        painter.text(
+            egui::pos2(x, rect.top() + 25.0),
+            egui::Align2::LEFT_TOP,
+            *desc,
+            egui::FontId::proportional(11.5),
+            p.text2,
+        );
+        if resp
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+            && !selected
+        {
             *value = *v;
             changed = true;
         }
+        ui.add_space(2.0);
     }
     ui.add_space(4.0);
     changed

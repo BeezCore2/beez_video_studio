@@ -238,10 +238,7 @@ impl UpdateUi {
     /// "Version x.y.z · <extra> · Check for updates" line for the bottom of Home.
     pub fn footer(&mut self, ui: &mut egui::Ui, extra: &str) {
         ui.horizontal(|ui| {
-            caption(
-                ui,
-                &format!("Beez Video Studio · Version {CURRENT_VERSION}{extra}"),
-            );
+            caption(ui, &format!("Version {CURRENT_VERSION}{extra}"));
             let checking = matches!(
                 self.state,
                 State::Checking { .. } | State::Installing { .. }

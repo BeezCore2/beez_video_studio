@@ -93,7 +93,9 @@ fn check_engine(ctx: &egui::Context) -> Engine {
     let ctx = ctx.clone();
     std::thread::spawn(move || {
         let result = ffmpeg::refresh().map(|t| {
-            let version = ffmpeg::version(&t).unwrap_or_else(|| "?".into());
+            let version = ffmpeg::version(&t)
+                .map(|v| ffmpeg::friendly_version(&v))
+                .unwrap_or_else(|| "?".into());
             (version, ffmpeg::caps())
         });
         let _ = tx.send(result);
@@ -382,7 +384,7 @@ impl App {
                 self.bin.import(files, ui.ctx());
             }
             ui.add_space(12.0);
-            caption(ui, "Space play · I / O mark In and Out · ← → step a frame · Home / End jump to In / Out");
+            caption(ui, "Space to play.   I and O mark In and Out.   ← and → step one frame.   Home and End jump to In and Out.");
         });
         t
     }
@@ -522,14 +524,14 @@ impl App {
     fn footer_text(&self) -> String {
         let mut text = String::new();
         if let Engine::Ready { version, caps } = &self.engine {
-            text.push_str(&format!(" · FFmpeg {version}"));
+            text.push_str(&format!("     FFmpeg {version}"));
             let gpus: Vec<&str> = [("nvenc", "NVIDIA"), ("qsv", "Intel"), ("amf", "AMD")]
                 .iter()
                 .filter(|(k, _)| caps.hardware.iter().any(|h| h.ends_with(k)))
                 .map(|(_, n)| *n)
                 .collect();
             if !gpus.is_empty() {
-                text.push_str(&format!(" · GPU: {}", gpus.join(", ")));
+                text.push_str(&format!("     GPU encoding: {}", gpus.join(", ")));
             }
         }
         text
@@ -762,11 +764,7 @@ impl eframe::App for App {
                     .inner;
             });
 
-        let bg = if p.dark {
-            Color32::from_rgb(0x12, 0x12, 0x14)
-        } else {
-            Color32::from_rgb(0xE4, 0xE4, 0xE7)
-        };
+        let bg = p.well;
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(bg).inner_margin(Margin::same(10)))
             .show(ui, |ui| {
