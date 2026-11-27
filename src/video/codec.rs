@@ -395,17 +395,6 @@ pub enum AudioCodec {
 }
 
 impl AudioCodec {
-    pub fn probe_name(self) -> &'static str {
-        match self {
-            AudioCodec::Aac => "aac",
-            AudioCodec::Opus => "opus",
-            AudioCodec::Mp3 => "mp3",
-            AudioCodec::Flac => "flac",
-            AudioCodec::Wav => "pcm_s16le",
-            AudioCodec::Vorbis => "vorbis",
-        }
-    }
-
     /// An audio filter this encoder needs, to be added to the `-af` chain.
     pub fn filter(self) -> Option<&'static str> {
         match self {
@@ -463,14 +452,6 @@ pub enum Container {
 }
 
 impl Container {
-    pub const ALL: [Container; 5] = [
-        Container::Mp4,
-        Container::Mkv,
-        Container::WebM,
-        Container::Mov,
-        Container::Avi,
-    ];
-
     pub fn ext(self) -> &'static str {
         match self {
             Container::Mp4 => "mp4",

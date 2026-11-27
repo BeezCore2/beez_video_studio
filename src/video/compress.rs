@@ -169,6 +169,48 @@ pub fn min_target_mb(info: &MediaInfo, audio_bps: u64) -> f64 {
     (MIN_VIDEO_BPS + audio_bps as f64) * info.duration / 0.98 / 8.0 / 1024.0 / 1024.0
 }
 
+/// What a compression will do, for the UI and the job.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plan {
+    /// Video bitrate for a target size.
+    pub video_bps: Option<u64>,
+    /// Output picture size, when it changes.
+    pub size: Option<(u32, u32)>,
+}
+
+/// Work out the bitrate (target size) and output size. `audio_bps` from [`audio_args`].
+pub fn plan(info: &MediaInfo, opts: &Options, audio_bps: u64) -> Result<Plan> {
+    let video_bps = match opts.mode {
+        Mode::Quality(_) => None,
+        Mode::TargetSize(mb) => {
+            if info.duration <= 0.0 {
+                bail!("The video's length is unknown, so a target size cannot be used. Use a quality level instead.");
+            }
+            let budget = mb * 1024.0 * 1024.0 * 8.0 * 0.98 / info.duration;
+            let video_bps = budget - audio_bps as f64;
+            if video_bps < 60_000.0 {
+                bail!(
+                    "{mb:.1} MB is too small for this {:.0}-second video. Choose at least {:.1} MB, or remove the audio.",
+                    info.duration,
+                    min_target_mb(info, audio_bps).max(0.1)
+                );
+            }
+            if (mb * 1024.0 * 1024.0) as u64 >= info.size {
+                bail!("The video is already smaller than {mb:.1} MB. Choose a smaller target size.");
+            }
+            Some(video_bps as u64)
+        }
+    };
+    let size = video_filters(info, opts, opts.codec, video_bps)
+        .first()
+        .and_then(|f| f.strip_prefix("scale="))
+        .and_then(|f| {
+            let mut it = f.split([':', ',']);
+            Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+        });
+    Ok(Plan { video_bps, size })
+}
+
 /// Build the compression job.
 pub fn build(info: &MediaInfo, out: &Path, opts: &Options, caps: &Caps) -> Result<Job> {
     if info.video.is_none() {
@@ -180,29 +222,13 @@ pub fn build(info: &MediaInfo, out: &Path, opts: &Options, caps: &Caps) -> Resul
     let ten_bit = keep_ten_bit(info, codec);
     let (audio, audio_bps) = audio_args(info, opts.audio, container);
 
-    let (rate, video_bps) = match opts.mode {
-        Mode::Quality(crf) => (Rate::Quality(crf), None),
-        Mode::TargetSize(mb) => {
-            if info.duration <= 0.0 {
-                bail!("The video's length is unknown, so a target size cannot be used. Use a quality level instead.");
-            }
-            let budget = mb * 1024.0 * 1024.0 * 8.0 * 0.98 / info.duration;
-            let video_bps = budget - audio_bps as f64;
-            let min = min_target_mb(info, audio_bps);
-            if video_bps < 60_000.0 {
-                bail!(
-                    "{mb:.1} MB is too small for this {:.0}-second video. Choose at least {:.1} MB, or remove the audio.",
-                    info.duration,
-                    min.max(0.1)
-                );
-            }
-            if (mb * 1024.0 * 1024.0) as u64 >= info.size {
-                bail!(
-                    "The video is already smaller than {mb:.1} MB. Choose a smaller target size."
-                );
-            }
-            (Rate::Bitrate(video_bps as u64), Some(video_bps as u64))
-        }
+    let plan = plan(info, opts, audio_bps)?;
+    let (rate, video_bps) = match plan.video_bps {
+        Some(bps) => (Rate::Bitrate(bps), Some(bps)),
+        None => match opts.mode {
+            Mode::Quality(crf) => (Rate::Quality(crf), None),
+            Mode::TargetSize(_) => unreachable!("target size always has a bitrate"),
+        },
     };
 
     let filters = video_filters(info, opts, codec, video_bps);

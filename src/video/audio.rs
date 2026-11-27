@@ -11,7 +11,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-use super::codec::{Args, AudioCodec, Container};
+use super::codec::{Args, AudioCodec};
 use super::compress::input;
 use super::edit::container_for;
 use super::ffmpeg::{self, Span};
@@ -338,13 +338,6 @@ pub fn build_music(info: &MediaInfo, music: &MediaInfo, out: &Path, mode: MusicM
     let job = Job::new(Output::File(out.to_path_buf()), "Saved");
     let stage = if mix { "Mixing audio" } else { "Replacing audio" };
     Ok(job.pass(Pass::new(a, stage, info.duration)))
-}
-
-/// Used by the UI for the "Save as" filter of audio outputs.
-pub fn is_container(out: &Path) -> bool {
-    out.extension()
-        .and_then(|e| Container::from_ext(&e.to_string_lossy()))
-        .is_some()
 }
 
 #[cfg(test)]

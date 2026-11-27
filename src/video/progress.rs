@@ -47,12 +47,6 @@ impl Progress {
         }
     }
 
-    /// Report progress through `n` equal steps inside the range `from..to`.
-    pub fn step(&self, from: f32, to: f32, i: usize, n: usize, stage: impl Into<String>) {
-        let t = if n == 0 { 1.0 } else { i as f32 / n as f32 };
-        self.set(from + (to - from) * t, stage);
-    }
-
     /// Fraction done, or `None` before the first report.
     pub fn fraction(&self) -> Option<f32> {
         let v = self.0.done.load(Ordering::Relaxed);
@@ -94,7 +88,7 @@ mod tests {
     fn progress_and_cancel() {
         let p = Progress::default();
         assert_eq!(p.fraction(), None);
-        p.step(0.2, 0.6, 1, 4, "Working");
+        p.set(0.3, "Working");
         assert!((p.fraction().unwrap() - 0.3).abs() < 1e-3);
         assert_eq!(p.stage(), "Working");
         assert!(p.check().is_ok());

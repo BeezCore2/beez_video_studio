@@ -343,7 +343,7 @@ impl TransformOptions {
     /// Only a rotation: this can be done by changing the rotation metadata, without
     /// re-encoding (instant and lossless).
     pub fn rotation_only(&self) -> bool {
-        self.rotate % 360 != 0
+        !self.rotate.is_multiple_of(360)
             && self.resize == Resize::Keep
             && !self.flip_h
             && !self.flip_v

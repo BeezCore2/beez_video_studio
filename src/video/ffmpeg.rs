@@ -4,8 +4,9 @@
 //! looked up, in this order:
 //!   1. the folder named by the `BEEZVIDEO_FFMPEG_DIR` environment variable,
 //!   2. next to the app's executable (also `ffmpeg\` and `ffmpeg\bin\` beside it),
-//!   3. the app's own copy in `%LOCALAPPDATA%\Beez Video Studio\ffmpeg\bin` (see `download`),
-//!   4. the `PATH`.
+//!   3. a folder the user picked ("Locate FFmpeg…", remembered in `ffmpeg-dir.txt`),
+//!   4. the app's own copy in `%LOCALAPPDATA%\Beez Video Studio\ffmpeg\bin` (see `download`),
+//!   5. the `PATH`.
 //!
 //! While encoding, FFmpeg writes machine-readable progress (`-progress pipe:1`) to stdout:
 //! `out_time_us=…` tells how far into the media it is, which, divided by the duration,
@@ -44,6 +45,21 @@ pub fn private_dir() -> PathBuf {
     crate::startup::data_dir().join("ffmpeg").join("bin")
 }
 
+fn chosen_dir_file() -> PathBuf {
+    crate::startup::data_dir().join("ffmpeg-dir.txt")
+}
+
+/// Remember a folder containing ffmpeg and ffprobe chosen by the user. Returns the tools
+/// when the folder (or its `bin` subfolder) really contains them.
+pub fn set_dir(dir: &Path) -> Option<Tools> {
+    let dir = [dir.to_path_buf(), dir.join("bin")]
+        .into_iter()
+        .find(|d| d.join(exe("ffmpeg")).is_file() && d.join(exe("ffprobe")).is_file())?;
+    let _ = std::fs::create_dir_all(crate::startup::data_dir());
+    std::fs::write(chosen_dir_file(), dir.to_string_lossy().as_bytes()).ok()?;
+    refresh()
+}
+
 fn candidate_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(d) = std::env::var_os(DIR_ENV) {
@@ -56,6 +72,12 @@ fn candidate_dirs() -> Vec<PathBuf> {
         dirs.push(dir.join("ffmpeg").join("bin"));
         dirs.push(dir.join("ffmpeg"));
         dirs.push(dir);
+    }
+    if let Ok(chosen) = std::fs::read_to_string(chosen_dir_file()) {
+        let chosen = chosen.trim();
+        if !chosen.is_empty() {
+            dirs.push(PathBuf::from(chosen));
+        }
     }
     dirs.push(private_dir());
     if let Some(path) = std::env::var_os("PATH") {
