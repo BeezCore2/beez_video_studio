@@ -33,6 +33,8 @@ pub struct Pass {
     pub duration: f64,
     /// Share of the progress bar (relative to the other passes).
     pub weight: f32,
+    /// Working directory for FFmpeg (see [`ffmpeg::run_in`]).
+    pub cwd: Option<PathBuf>,
 }
 
 impl Pass {
@@ -43,7 +45,13 @@ impl Pass {
             stage: stage.into(),
             duration,
             weight: 1.0,
+            cwd: None,
         }
+    }
+
+    pub fn in_dir(mut self, dir: Option<PathBuf>) -> Self {
+        self.cwd = dir;
+        self
     }
 
     pub fn null(mut self) -> Self {
@@ -262,7 +270,7 @@ pub fn execute_in(job: Job, progress: &Progress, from: f32, to: f32) -> Result<S
             duration: pass.duration,
             stage: &stage,
         };
-        result = ffmpeg::run(&args.0, span);
+        result = ffmpeg::run_in(&args.0, span, pass.cwd.as_deref());
         if result.is_err() {
             break;
         }

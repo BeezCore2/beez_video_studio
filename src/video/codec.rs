@@ -369,13 +369,19 @@ impl VideoCodec {
     }
 
     /// Arguments for pass `n` (1 or 2) of a two-pass encode, using `log` as the stats prefix.
+    /// x265 gets only the file name (its option string can't hold `C:\`): run FFmpeg in
+    /// the log's folder, see [`Self::pass_dir`].
     pub fn pass_args(self, n: u8, log: &str) -> Args {
         let mut a = Args::new();
         match self {
             VideoCodec::H265 => {
+                let name = std::path::Path::new(log)
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| log.to_string());
                 a.pair(
                     "-x265-params",
-                    format!("log-level=error:pass={n}:stats={log}.log"),
+                    format!("log-level=error:pass={n}:stats={name}.log"),
                 );
             }
             _ => {
@@ -383,6 +389,13 @@ impl VideoCodec {
             }
         }
         a
+    }
+
+    /// The working directory two-pass encodes must run in (x265 only).
+    pub fn pass_dir(self, log: &str) -> Option<std::path::PathBuf> {
+        (self == VideoCodec::H265)
+            .then(|| std::path::Path::new(log).parent().map(|p| p.to_path_buf()))
+            .flatten()
     }
 
     /// The minimum sensible bits per pixel per frame for watchable output. Used to pick a

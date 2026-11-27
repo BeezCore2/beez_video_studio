@@ -7,6 +7,8 @@ pub mod codec;
 pub mod compress;
 pub mod convert;
 pub mod download;
+#[cfg(test)]
+mod e2e;
 pub mod edit;
 pub mod ffmpeg;
 pub mod frames;

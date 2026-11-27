@@ -308,9 +308,29 @@ pub fn run(args: &[OsString], span: Span) -> Result<()> {
 /// Like [`run`], but logs at `loglevel` and returns FFmpeg's log (stderr), for analysis
 /// filters that print their results there (e.g. `loudnorm`).
 pub fn run_capture(args: &[OsString], span: Span, loglevel: &str) -> Result<String> {
+    run_capture_in(args, span, loglevel, None)
+}
+
+/// [`run`] with FFmpeg's working directory set to `cwd` (for options that can only take a
+/// relative path, such as x265's stats file: its option string uses `:` as a separator,
+/// which clashes with `C:\` in absolute Windows paths).
+pub fn run_in(args: &[OsString], span: Span, cwd: Option<&Path>) -> Result<()> {
+    run_capture_in(args, span, "error", cwd).map(|_| ())
+}
+
+fn run_capture_in(
+    args: &[OsString],
+    span: Span,
+    loglevel: &str,
+    cwd: Option<&Path>,
+) -> Result<String> {
     let t = require()?;
     span.progress.check()?;
-    let mut child = command(&t.ffmpeg)
+    let mut cmd = command(&t.ffmpeg);
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    let mut child = cmd
         .args(["-hide_banner", "-nostdin", "-y", "-loglevel", loglevel])
         .args(["-nostats", "-progress", "pipe:1", "-stats_period", "0.25"])
         .args(args)

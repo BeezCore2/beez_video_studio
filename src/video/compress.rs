@@ -367,7 +367,8 @@ pub fn build(info: &MediaInfo, out: &Path, opts: &Options, caps: &Caps) -> Resul
             .pass(
                 Pass::new(first, "Analysing (pass 1 of 2)", info.duration)
                     .null()
-                    .weight(0.35),
+                    .weight(0.35)
+                    .in_dir(codec.pass_dir(&log_s)),
             )
             .pass(
                 Pass::new(
@@ -375,7 +376,8 @@ pub fn build(info: &MediaInfo, out: &Path, opts: &Options, caps: &Caps) -> Resul
                     format!("{stage} (pass 2 of 2)"),
                     info.duration,
                 )
-                .weight(0.65),
+                .weight(0.65)
+                .in_dir(codec.pass_dir(&log_s)),
             );
         job.temp.push(format!("{log_s}*").into());
     } else {
